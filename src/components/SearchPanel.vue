@@ -15,7 +15,7 @@ export default {
     async search() {
       if (!this.keyword.trim()) return;
       try {
-        const resp = await fetch(`http://localhost:3000/search?keyword=${encodeURIComponent(this.keyword)}`);
+        const resp = await fetch(`/search?keyword=${encodeURIComponent(this.keyword)}`);
         const data = await resp.json();
         if (data.success) {
           this.$emit("updateResults", data.results);

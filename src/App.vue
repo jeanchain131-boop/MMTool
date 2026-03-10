@@ -66,7 +66,7 @@ export default {
         const id = ids[i];
         this.currentAction = `正在添加剧集 ${id}`;
         try {
-          const resp = await fetch("http://localhost:3000/getdramas", {
+          const resp = await fetch("/getdramas", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ drama_ids: [id] })
@@ -110,7 +110,7 @@ export default {
       this.currentAction = "开始统计";
 
       try {
-        const resp = await fetch("http://localhost:3000/getdanmaku", {
+        const resp = await fetch("getdanmaku", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ sounds })
