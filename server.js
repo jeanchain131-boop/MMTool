@@ -1,3 +1,4 @@
+import fs from "fs/promises";
 import cors from "cors";
 import express from "express";
 import fetch from "node-fetch";
@@ -16,6 +17,8 @@ const SOUND_SUMMARY_CACHE_TTL_MS = 30 * 60 * 1000;
 const REWARD_SUMMARY_CACHE_TTL_MS = 30 * 60 * 1000;
 const ACCESS_DENIED_COOLDOWN_MS = 10 * 60 * 1000;
 const port = Number(process.env.PORT) || 3000;
+const logsDir = path.join(__dirname, "logs");
+const usageLogPath = path.join(logsDir, "usage.log");
 
 let accessDeniedUntil = 0;
 
@@ -82,6 +85,40 @@ function setCachedValue(cache, key, value) {
     value,
     createdAt: Date.now(),
   });
+}
+
+function normalizeKeyword(keyword) {
+  return String(keyword ?? "").trim().slice(0, 200);
+}
+
+function normalizeDramaIds(ids) {
+  return Array.from(
+    new Set(
+      (Array.isArray(ids) ? ids : [])
+        .map((id) => Number(id))
+        .filter((id) => Number.isFinite(id) && id > 0)
+    )
+  ).slice(0, 200);
+}
+
+async function writeUsageLog(entry) {
+  const logEntry = {
+    timestamp: new Date().toISOString(),
+    ...entry,
+  };
+
+  console.log("[usage]", JSON.stringify(logEntry));
+
+  try {
+    await fs.mkdir(logsDir, { recursive: true });
+    await fs.appendFile(
+      usageLogPath,
+      `${JSON.stringify(logEntry)}\n`,
+      "utf8"
+    );
+  } catch (error) {
+    console.error("Failed to write usage log", error);
+  }
 }
 
 async function fetchJsonWithRetry(url, retries = 2, delayMs = 250) {
@@ -321,15 +358,21 @@ app.get("/image-proxy", async (req, res) => {
 
 app.get("/search", async (req, res) => {
   const { keyword } = req.query;
+  const normalizedKeyword = normalizeKeyword(keyword);
 
-  if (!keyword) {
+  if (!normalizedKeyword) {
     return res.json({ success: false, message: "缺少 keyword 参数" });
   }
+
+  void writeUsageLog({
+    action: "search",
+    keyword: normalizedKeyword,
+  });
 
   try {
     const data = await fetchJsonWithRetry(
       `https://www.missevan.com/dramaapi/search?s=${encodeURIComponent(
-        keyword
+        normalizedKeyword
       )}&page=1`
     );
 
@@ -361,10 +404,18 @@ app.get("/search", async (req, res) => {
 });
 
 app.post("/getdramacards", async (req, res) => {
-  const ids = req.body.drama_ids || [];
+  const ids = normalizeDramaIds(req.body.drama_ids || []);
   const results = [];
   const failedIds = [];
   let accessDenied = false;
+
+  if (ids.length) {
+    void writeUsageLog({
+      action: "manual_import",
+      dramaIds: ids,
+      count: ids.length,
+    });
+  }
 
   for (const id of ids) {
     try {
