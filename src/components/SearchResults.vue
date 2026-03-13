@@ -12,7 +12,7 @@
       <div class="toolbar-group toolbar-group-run">
         <div class="toolbar-label">执行操作</div>
         <div class="toolbar-actions">
-          <button class="run-btn" @click="addSelected">导入作品</button>
+          <button class="run-btn" @click="addSelected">导入分集</button>
           <button
             v-if="platform === 'missevan'"
             class="run-btn run-btn-secondary"
@@ -42,11 +42,11 @@
 
         <div class="result-info">
           <div class="result-title">{{ item.name }}</div>
-          <div class="result-meta">{{ idLabel }}：{{ item.id }}</div>
+          <div class="result-meta">{{ idLabel }}: {{ item.id }}</div>
           <div class="result-meta">
-            总播放量：{{ getPlayCountText(item) }}
+            总播放量: {{ getPlayCountText(item) }}
             <template v-if="hasSubscriptionNum(item)">
-              / {{ extraMetaLabel }}：{{ formatNumber(item.subscription_num) }}
+              / {{ extraMetaLabel }}: {{ formatNumber(item.subscription_num) }}
             </template>
           </div>
         </div>

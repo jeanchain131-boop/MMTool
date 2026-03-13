@@ -33,7 +33,12 @@
           class="search-input search-textarea"
           :placeholder="manualPlaceholder"
         ></textarea>
-        <button class="primary-btn" @click="queryManualInput">{{ manualButtonText }}</button>
+        <div class="search-actions">
+          <button class="primary-btn" @click="queryManualInput">{{ manualButtonText }}</button>
+          <button class="secondary-btn" type="button" @click="clearManualInput">
+            清空
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -103,6 +108,10 @@ export default {
     },
   },
   methods: {
+    clearManualInput() {
+      this.keyword = "";
+      this.manualInput = "";
+    },
     async fetchAppConfig() {
       try {
         const response = await fetch("/app-config");
@@ -128,10 +137,10 @@ export default {
     },
     getMissevanAccessLimitedText(config = null) {
       if (this.isDesktopApp) {
-        return "如果看到访问受限，请使用任意浏览器打开猫耳主页完成验证后再重试。";
+        return "如果看到访问受限，请先用任意浏览器打开猫耳主页完成验证后再重试。";
       }
 
-      return `如果搜索接口暂时受限，请 ${this.getRemainingCooldownHours(config)} 小时后再来`;
+      return `如果搜索接口暂时受限，请 ${this.getRemainingCooldownHours(config)} 小时后再来。`;
     },
     parseIds(rawValue) {
       return Array.from(
@@ -353,6 +362,12 @@ export default {
   align-items: stretch;
 }
 
+.search-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .search-input {
   width: 100%;
   min-height: 44px;
@@ -383,6 +398,18 @@ export default {
   border-radius: 12px;
 }
 
+.secondary-btn {
+  min-width: 112px;
+  min-height: 44px;
+  padding: 12px 16px;
+  color: var(--select-text);
+  font-weight: 700;
+  cursor: pointer;
+  background: var(--select-bg);
+  border: 1px solid var(--select-border);
+  border-radius: 12px;
+}
+
 @media (max-width: 640px) {
   .search-panel {
     padding: 14px;
@@ -393,6 +420,10 @@ export default {
   }
 
   .primary-btn {
+    width: 100%;
+  }
+
+  .secondary-btn {
     width: 100%;
   }
 }

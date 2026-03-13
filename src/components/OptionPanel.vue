@@ -18,7 +18,7 @@
             统计播放量
           </button>
           <button class="run-btn run-btn-secondary" @click="startIdStats">
-            统计弹幕ID
+            统计弹幕 ID
           </button>
         </div>
       </div>
@@ -77,8 +77,11 @@
 </template>
 
 <script>
+const EPISODE_NUMBER_PATTERN =
+  "[0-9零一二两三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟]+";
+
 const MISSEVAN_MAIN_INCLUDE_PATTERNS = [
-  /第\s*[0-9零一二两三四五六七八九十百千]+[集话期章节卷]/u,
+  new RegExp(`第\\s*${EPISODE_NUMBER_PATTERN}\\s*[集话期章节卷]`, "u"),
   /(?:^|\s)ep\.?\s*[0-9]+/i,
   /(?:^|\s)e[0-9]{1,3}(?:\D|$)/i,
   /ova/i,
@@ -102,7 +105,7 @@ const MISSEVAN_MAIN_EXCLUDE_PATTERNS = [
 
 const MANBO_MAIN_INCLUDE_PATTERNS = [
   /(?:^|[^\w])EP\s*0*[0-9]+/i,
-  /第\s*[0-9零一二两三四五六七八九十百千]+[期集话章节卷]/u,
+  new RegExp(`第\\s*${EPISODE_NUMBER_PATTERN}\\s*[期集话章节卷]`, "u"),
 ];
 
 const MANBO_MAIN_EXCLUDE_PATTERNS = [
@@ -253,7 +256,7 @@ export default {
 
 .toolbar-group {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 10px 16px;
   align-items: center;
   justify-content: space-between;
@@ -270,6 +273,7 @@ export default {
 }
 
 .toolbar-label {
+  flex: 0 0 auto;
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 700;
@@ -287,7 +291,7 @@ export default {
 .toolbar-actions-select {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  flex: 1 1 100%;
+  flex: 1 1 auto;
 }
 
 .select-btn {
@@ -451,6 +455,7 @@ export default {
   }
 
   .toolbar-group {
+    flex-wrap: wrap;
     align-items: stretch;
   }
 
@@ -487,10 +492,16 @@ export default {
 
   .drama-actions {
     width: 100%;
+    flex-wrap: nowrap;
+    gap: 6px;
   }
 
   .drama-actions .select-btn-small {
-    flex: 1 1 calc(50% - 4px);
+    flex: 1 1 25%;
+    min-width: 0;
+    min-height: 30px;
+    padding: 6px 4px;
+    font-size: 11px;
   }
 
   .episode-row {

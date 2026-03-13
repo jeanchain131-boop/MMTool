@@ -1,4 +1,4 @@
-import fs from "fs/promises";
+﻿import fs from "fs/promises";
 import cors from "cors";
 import express from "express";
 import fetch from "node-fetch";
@@ -43,7 +43,7 @@ const MANBO_DRAMA_CACHE_TTL_MS = 30 * 60 * 1000;
 const MANBO_SET_CACHE_TTL_MS = 30 * 60 * 1000;
 const MANBO_DANMAKU_CACHE_TTL_MS = 30 * 60 * 1000;
 const MANBO_STATS_TASK_TTL_MS = 60 * 60 * 1000;
-const MANBO_STATS_TASK_HEARTBEAT_TIMEOUT_MS = 30 * 1000;
+const MANBO_STATS_TASK_HEARTBEAT_TIMEOUT_MS = 5 * 60 * 1000;
 
 let accessDeniedUntil = 0;
 let cooldownStateLoaded = false;
@@ -51,7 +51,7 @@ let cooldownStateLoaded = false;
 app.use(cors());
 app.use(express.json());
 
-app.get("/app-config", (req, res) => {
+app.get("/app-config", (req, res) => {)
   res.json({
     missevanEnabled: MISSEVAN_ENABLED,
     desktopApp: DESKTOP_APP,
@@ -63,6 +63,7 @@ app.get("/app-config", (req, res) => {
     cooldownHours: MISSEVAN_COOLDOWN_HOURS,
     cooldownUntil: isInAccessDeniedCooldown() ? accessDeniedUntil : 0,
   });
+});
 });
 
 function sleep(ms) {
@@ -1388,7 +1389,7 @@ async function executeManboStatsTask(task) {
 
   updateManboTask(task, {
     status: "running",
-    currentAction: "开始统计弹幕与去重ID",
+    currentAction: "开始统计弹幕与去重 ID",
     progress: 0,
   });
 
@@ -1435,7 +1436,7 @@ async function executeManboStatsTask(task) {
           task.totalCount > 0
             ? Math.floor((task.completedCount / task.totalCount) * 100)
             : 100,
-        currentAction: `统计 ID ${task.completedCount}/${task.totalCount}`,
+        currentAction: `统计 ID ${task.completedCount}/${task.totalCount}`, 
         totalUsers: allUsers.size,
       });
     });
