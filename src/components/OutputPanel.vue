@@ -5,15 +5,12 @@
         <div>
           <div class="status-kicker">运行状态</div>
           <div class="status-text">{{ currentAction || "等待执行操作" }}</div>
+          <div class="status-elapsed">处理用时：{{ formatElapsed(elapsedMs) }}</div>
         </div>
         <div class="status-side">
-          <div v-if="isRunning" class="status-badge">运行中</div>
+          <div v-if="isRunning" class="status-badge">进行中</div>
           <div class="status-progress">{{ progress }}%</div>
         </div>
-      </div>
-
-      <div class="status-note">
-        手机浏览器切到后台后，系统可能暂停页面执行。长任务建议保持页面在前台。
       </div>
 
       <div class="output-progress">
@@ -23,7 +20,6 @@
 
     <div v-if="playCountResults.length" class="output-section">
       <div class="output-section-title">播放量统计</div>
-
       <div class="output-list">
         <div
           v-for="drama in playCountResults"
@@ -31,39 +27,26 @@
           class="output-card"
         >
           <div class="output-card-title">
-            {{ drama.title }} · 已选 {{ drama.selectedEpisodeCount }} 集
+            {{ drama.title }} / 已选 {{ drama.selectedEpisodeCount }} 集
           </div>
-
-          <div class="output-stats output-stats-single">
-            <div class="output-stat-item">
-              <div class="output-stat-label">总播放量</div>
-              <div class="output-stat-value">
-                {{ formatPlayCountDisplay(drama.playCountTotal, drama.playCountFailed) }}
-              </div>
-            </div>
+          <div class="output-stat-label">总播放量</div>
+          <div class="output-stat-value">
+            {{ formatPlayCountDisplay(drama.playCountTotal, drama.playCountFailed) }}
           </div>
         </div>
 
         <div class="output-summary-card">
-          <div class="output-card-title">
-            汇总 · 已选 {{ playCountSelectedEpisodeCount }} 集
-          </div>
-
-          <div class="output-stats output-stats-single">
-            <div class="output-stat-item">
-              <div class="output-stat-label">总播放量</div>
-              <div class="output-stat-value">
-                {{ formatPlayCountDisplay(playCountTotal, playCountFailed) }}
-              </div>
-            </div>
+          <div class="output-card-title">汇总 / 已选 {{ playCountSelectedEpisodeCount }} 集</div>
+          <div class="output-stat-label">总播放量</div>
+          <div class="output-stat-value">
+            {{ formatPlayCountDisplay(playCountTotal, playCountFailed) }}
           </div>
         </div>
       </div>
     </div>
 
     <div v-if="idResults.length" class="output-section">
-      <div class="output-section-title">ID 与弹幕统计</div>
-
+      <div class="output-section-title">弹幕与去重 ID 统计</div>
       <div class="output-list">
         <div
           v-for="drama in idResults"
@@ -71,16 +54,14 @@
           class="output-card"
         >
           <div class="output-card-title">
-            {{ drama.title }} · 已选 {{ drama.selectedEpisodeCount }} 集
+            {{ drama.title }} / 已选 {{ drama.selectedEpisodeCount }} 集
           </div>
-
           <div class="output-stats">
-            <div class="output-stat-item">
+            <div>
               <div class="output-stat-label">总弹幕数</div>
               <div class="output-stat-value">{{ drama.danmaku }}</div>
             </div>
-
-            <div class="output-stat-item">
+            <div>
               <div class="output-stat-label">去重 ID 数</div>
               <div class="output-stat-value">{{ drama.users }}</div>
             </div>
@@ -88,17 +69,13 @@
         </div>
 
         <div class="output-summary-card">
-          <div class="output-card-title">
-            汇总 · 已选 {{ idSelectedEpisodeCount }} 集
-          </div>
-
+          <div class="output-card-title">汇总 / 已选 {{ idSelectedEpisodeCount }} 集</div>
           <div class="output-stats">
-            <div class="output-stat-item">
+            <div>
               <div class="output-stat-label">总弹幕数</div>
               <div class="output-stat-value">{{ totalDanmaku }}</div>
             </div>
-
-            <div class="output-stat-item">
+            <div>
               <div class="output-stat-label">去重 ID 数</div>
               <div class="output-stat-value">{{ totalUsers }}</div>
             </div>
@@ -109,7 +86,6 @@
 
     <div v-if="revenueResults.length" class="output-section">
       <div class="output-section-title">最低收益预估</div>
-
       <div class="output-list">
         <div
           v-for="drama in revenueResults"
@@ -117,29 +93,26 @@
           class="output-card"
         >
           <div class="output-card-title">
-            {{ drama.title }} · 单价 {{ formatDiamond(drama.price) }}
+            {{ drama.title }} / 单价 {{ formatDiamond(drama.price) }}
           </div>
-
           <div class="output-stats">
-            <div class="output-stat-item">
+            <div>
               <div class="output-stat-label">付费用户 ID 数</div>
               <div class="output-stat-value">
                 {{ drama.failed ? "访问失败" : drama.paidUserCount }}
               </div>
             </div>
-
-            <div class="output-stat-item">
+            <div>
               <div class="output-stat-label">打赏榜总额</div>
               <div class="output-stat-value">
                 {{ drama.failed ? "访问失败" : formatDiamond(drama.rewardCoinTotal) }}
               </div>
             </div>
           </div>
-
           <div class="output-revenue-line">
             <div class="output-stat-label">最低收益</div>
             <div class="output-stat-value">
-              {{ drama.failed ? "最低收益预估失败" : formatRevenue(drama.estimatedRevenueYuan) }}
+              {{ drama.failed ? "预估失败" : formatRevenue(drama.estimatedRevenueYuan) }}
             </div>
           </div>
         </div>
@@ -151,87 +124,64 @@
 <script>
 export default {
   props: {
-    progress: {
-      type: Number,
-      default: 0,
-    },
-    currentAction: {
-      type: String,
-      default: "",
-    },
-    playCountResults: {
-      type: Array,
-      default: () => [],
-    },
-    playCountSelectedEpisodeCount: {
-      type: Number,
-      default: 0,
-    },
-    playCountTotal: {
-      type: Number,
-      default: 0,
-    },
-    playCountFailed: {
-      type: Boolean,
-      default: false,
-    },
-    idResults: {
-      type: Array,
-      default: () => [],
-    },
-    idSelectedEpisodeCount: {
-      type: Number,
-      default: 0,
-    },
-    totalDanmaku: {
-      type: Number,
-      default: 0,
-    },
-    totalUsers: {
-      type: Number,
-      default: 0,
-    },
-    revenueResults: {
-      type: Array,
-      default: () => [],
-    },
-    isRunning: {
-      type: Boolean,
-      default: false,
-    },
+    progress: Number,
+    currentAction: String,
+    elapsedMs: Number,
+    playCountResults: Array,
+    playCountSelectedEpisodeCount: Number,
+    playCountTotal: Number,
+    playCountFailed: Boolean,
+    idResults: Array,
+    idSelectedEpisodeCount: Number,
+    totalDanmaku: Number,
+    totalUsers: Number,
+    revenueResults: Array,
+    isRunning: Boolean,
   },
   methods: {
-    formatPlayCountWan(value) {
-      const count = Number(value);
-
-      if (!Number.isFinite(count) || count <= 0) {
-        return "0.0万";
-      }
-
-      return `${(count / 10000).toFixed(1)}万`;
-    },
     formatPlayCountDisplay(value, failed) {
-      return failed ? "部分分集播放量统计失败" : this.formatPlayCountWan(value);
+      if (failed) {
+        return "部分分集统计失败";
+      }
+      const count = Number(value ?? 0);
+      if (!Number.isFinite(count) || count <= 0) {
+        return "0";
+      }
+      if (count < 10000) {
+        return `${count}`;
+      }
+      if (count < 100000000) {
+        return `${(count / 10000).toFixed(1)}万`;
+      }
+      return `${(count / 100000000).toFixed(2)}亿`;
     },
     formatDiamond(value) {
       return `${Number(value ?? 0)} 钻石`;
     },
     formatRevenue(value) {
       const amount = Number(value ?? 0);
-
       if (!Number.isFinite(amount) || amount <= 0) {
         return "0 元";
       }
-
       if (amount >= 100000000) {
         return `${(amount / 100000000).toFixed(2)} 亿元`;
       }
-
       if (amount >= 10000) {
         return `${(amount / 10000).toFixed(1)} 万元`;
       }
-
       return `${Math.round(amount)} 元`;
+    },
+    formatElapsed(value) {
+      const totalSeconds = Math.max(0, Math.floor(Number(value ?? 0) / 1000));
+      const hours = Math.floor(totalSeconds / 3600);
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+      const seconds = totalSeconds % 60;
+
+      if (hours > 0) {
+        return `${hours}h ${String(minutes).padStart(2, "0")}m ${String(seconds).padStart(2, "0")}s`;
+      }
+
+      return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
     },
   },
 };
@@ -240,14 +190,14 @@ export default {
 <style scoped>
 .output-panel {
   display: grid;
-  gap: 18px;
-  padding: 20px;
+  gap: 16px;
+  padding: 18px;
 }
 
 .output-status-card,
 .output-card,
 .output-summary-card {
-  padding: 16px;
+  padding: 14px;
   background: rgba(255, 255, 255, 0.78);
   border: 1px solid rgba(29, 53, 87, 0.08);
   border-radius: 16px;
@@ -277,8 +227,16 @@ export default {
 }
 
 .status-text {
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 700;
+  line-height: 1.4;
+}
+
+.status-elapsed {
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .status-side {
@@ -302,13 +260,6 @@ export default {
   font-weight: 800;
 }
 
-.status-note {
-  margin-bottom: 12px;
-  color: var(--text-muted);
-  font-size: 13px;
-  line-height: 1.6;
-}
-
 .output-progress {
   height: 12px;
   overflow: hidden;
@@ -320,23 +271,22 @@ export default {
   height: 100%;
   background: linear-gradient(135deg, var(--accent), var(--accent-strong));
   border-radius: inherit;
-  transition: width 0.3s ease;
 }
 
 .output-section {
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
 .output-section-title {
   color: var(--text-strong);
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 800;
 }
 
 .output-list {
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
 .output-summary-card {
@@ -356,22 +306,16 @@ export default {
   gap: 10px 14px;
 }
 
-.output-stats-single {
-  grid-template-columns: 1fr;
-}
-
 .output-stat-label {
   margin-bottom: 4px;
   color: var(--text-muted);
   font-size: 12px;
-  line-height: 1.45;
 }
 
 .output-stat-value {
   color: var(--text-strong);
   font-size: 16px;
   font-weight: 800;
-  line-height: 1.45;
 }
 
 .output-revenue-line {
@@ -382,16 +326,17 @@ export default {
 
 @media (max-width: 640px) {
   .output-panel {
-    padding: 16px;
+    padding: 14px;
   }
 
   .status-header {
-    align-items: flex-start;
     flex-direction: column;
+    align-items: flex-start;
   }
 
   .status-side {
-    flex-wrap: wrap;
+    width: 100%;
+    justify-content: space-between;
   }
 
   .output-stats {

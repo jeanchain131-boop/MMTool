@@ -1,14 +1,19 @@
 {
   "name": "missevan-counter",
   "version": "1.0.0",
+  "description": "M&M Toolkit for Missevan and Manbo statistics.",
+  "author": "M&M Toolkit",
   "type": "module",
+  "main": "electron/main.mjs",
   "engines": {
     "node": ">=18"
   },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "start": "node server.js"
+    "start": "node server.js",
+    "desktop": "npm run build && electron .",
+    "pack:win": "npm run build && electron-builder --win portable"
   },
   "dependencies": {
     "cors": "^2.8.5",
@@ -18,6 +23,34 @@
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.4",
+    "electron": "^36.0.0",
+    "electron-builder": "^26.0.12",
     "vite": "^5.0.0"
+  },
+  "build": {
+    "appId": "com.missevan.toolkit.desktop",
+    "productName": "M&M Toolkit",
+    "asar": true,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "server.js",
+      "package.json"
+    ],
+    "win": {
+      "icon": "windowsapp.ico",
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "M&M-Toolkit-${version}.exe"
+    }
   }
 }

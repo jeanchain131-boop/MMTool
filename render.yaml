@@ -5,3 +5,6 @@ services:
     plan: free
     buildCommand: npm install && npm run build
     startCommand: npm start
+    envVars:
+      - key: ENABLE_MISSEVAN
+        value: "false"

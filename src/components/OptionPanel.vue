@@ -4,19 +4,21 @@
       <div class="toolbar-group">
         <div class="toolbar-label">批量选择</div>
         <div class="toolbar-actions toolbar-actions-select">
-          <button class="select-btn" title="全选" @click="selectAll()">全选</button>
-          <button class="select-btn" title="清空" @click="clearAll()">清空</button>
-          <button class="select-btn" title="付费" @click="selectPaid()">付费</button>
-          <button class="select-btn" title="正片" @click="selectMain()">正片</button>
+          <button class="select-btn" @click="selectAll()">全选</button>
+          <button class="select-btn" @click="clearAll()">清空</button>
+          <button class="select-btn" @click="selectPaid()">付费</button>
+          <button class="select-btn" @click="selectMain()">正片</button>
         </div>
       </div>
 
       <div class="toolbar-group toolbar-group-run">
         <div class="toolbar-label">执行统计</div>
         <div class="toolbar-actions">
-          <button class="run-btn" @click="startPlayCount">统计播放量</button>
+          <button v-if="platform !== 'manbo'" class="run-btn" @click="startPlayCount">
+            统计播放量
+          </button>
           <button class="run-btn run-btn-secondary" @click="startIdStats">
-            统计 ID 数
+            统计弹幕ID
           </button>
         </div>
       </div>
@@ -26,22 +28,14 @@
       <div v-for="drama in dramas" :key="drama.drama.id" class="drama-card">
         <div class="drama-header" @click="toggle(drama)">
           <div class="drama-heading">
-            <span class="toggle-icon">{{ drama.expanded ? "−" : "+" }}</span>
+            <span class="toggle-icon">{{ drama.expanded ? "-" : "+" }}</span>
             <span class="drama-title">{{ drama.drama.name }}</span>
           </div>
           <div class="drama-actions" @click.stop>
-            <button class="select-btn select-btn-small" @click="selectAll(drama)">
-              全选
-            </button>
-            <button class="select-btn select-btn-small" @click="clearAll(drama)">
-              清空
-            </button>
-            <button class="select-btn select-btn-small" @click="selectPaid(drama)">
-              付费
-            </button>
-            <button class="select-btn select-btn-small" @click="selectMain(drama)">
-              正片
-            </button>
+            <button class="select-btn select-btn-small" @click="selectAll(drama)">全选</button>
+            <button class="select-btn select-btn-small" @click="clearAll(drama)">清空</button>
+            <button class="select-btn select-btn-small" @click="selectPaid(drama)">付费</button>
+            <button class="select-btn select-btn-small" @click="selectMain(drama)">正片</button>
           </div>
         </div>
 
@@ -60,11 +54,16 @@
               <div class="episode-info">
                 <div class="episode-title-line">
                   <span class="episode-title">{{ episode.name }}</span>
-                  <span class="episode-id">Sound ID: {{ episode.sound_id }}</span>
+                  <span class="episode-id">{{ idLabel }}: {{ episode.sound_id }}</span>
                 </div>
               </div>
             </label>
-            <span v-if="episode.need_pay" class="episode-tag">付费</span>
+            <span
+              v-if="getEpisodeTagText(episode)"
+              :class="['episode-tag', { 'episode-tag-member': isMemberEpisode(episode) }]"
+            >
+              {{ getEpisodeTagText(episode) }}
+            </span>
           </div>
         </div>
       </div>
@@ -72,55 +71,64 @@
 
     <div v-else class="empty-state">
       <div class="empty-title">还没有导入分集</div>
-      <div class="empty-text">先在上方搜索结果中选择剧集，再点击“导入分集”。</div>
+      <div class="empty-text">先在上方导入作品，再到这里批量勾选分集。</div>
     </div>
   </div>
 </template>
 
 <script>
-const MAIN_EPISODE_INCLUDE_PATTERNS = [
-  /^第[0-9零一二三四五六七八九十百千万两]+[集话期章节幕回]/i,
+const MISSEVAN_MAIN_INCLUDE_PATTERNS = [
+  /第\s*[0-9零一二两三四五六七八九十百千]+[集话期章节卷]/u,
   /(?:^|\s)ep\.?\s*[0-9]+/i,
   /(?:^|\s)e[0-9]{1,3}(?:\D|$)/i,
-  /(?:^|\s)sp(?:\D|$)/i,
-  /番外/,
-  /特别篇/,
-  /特别放送/,
   /ova/i,
 ];
 
-const MAIN_EPISODE_EXCLUDE_PATTERNS = [
-  /预告/,
-  /花絮/,
-  /采访/,
-  /主题曲/,
-  /片头曲/,
-  /片尾曲/,
-  /角色曲/,
-  /印象曲/,
-  /广播剧花絮/,
-  /福利/,
-  /彩蛋/,
-  /宣传/,
+const MISSEVAN_MAIN_EXCLUDE_PATTERNS = [
+  /预告/u,
+  /花絮/u,
+  /采访/u,
+  /主题曲/u,
+  /片头曲/u,
+  /片尾曲/u,
+  /福利/u,
+  /彩蛋/u,
   /PV/i,
   /CM/i,
-  /DEMO/i,
   /OST/i,
   /OP/i,
   /ED/i,
-  /试听/,
-  /先导/,
-  /预热/,
-  /角色预告/,
-  /制作花絮/,
-  /片段/,
+];
+
+const MANBO_MAIN_INCLUDE_PATTERNS = [
+  /(?:^|[^\w])EP\s*0*[0-9]+/i,
+  /第\s*[0-9零一二两三四五六七八九十百千]+[期集话章节卷]/u,
+];
+
+const MANBO_MAIN_EXCLUDE_PATTERNS = [
+  /预告/u,
+  /花絮/u,
+  /采访/u,
+  /FT/i,
+  /倒计时/u,
+  /主题曲/u,
+  /小剧场/u,
 ];
 
 export default {
   props: {
+    platform: {
+      type: String,
+      default: "missevan",
+    },
     dramas: {
       type: Array,
       default: () => [],
+    },
+  },
+  computed: {
+    idLabel() {
+      return this.platform === "manbo" ? "Set ID" : "Sound ID";
     },
   },
   methods: {
@@ -145,30 +153,37 @@ export default {
       this.$emit("selectionChange", selectedEpisodes);
     },
     setSelected(drama, predicate) {
-      const dramas = drama ? [drama] : this.dramas;
+      const targetDramas = drama ? [drama] : this.dramas;
 
-      dramas.forEach((item) => {
-        let changed = false;
-        let hasSelected = false;
-
+      targetDramas.forEach((item) => {
         item.episodes.episode.forEach((episode) => {
-          const nextSelected = predicate(episode);
-          if (episode.selected !== nextSelected) {
-            changed = true;
-          }
-
-          episode.selected = nextSelected;
-          if (episode.selected) {
-            hasSelected = true;
-          }
+          episode.selected = Boolean(predicate(episode));
         });
-
-        if (changed || hasSelected) {
-          item.expanded = true;
-        }
+        item.expanded = true;
       });
 
       this.emitSelectionChange();
+    },
+    isPaidEpisode(episode) {
+      return (
+        episode.need_pay === true ||
+        episode.need_pay === 1 ||
+        episode.need_pay === "1"
+      );
+    },
+    isMemberEpisode(episode) {
+      return (
+        episode.vip_free === true ||
+        episode.vip_free === 1 ||
+        episode.vip_free === "1"
+      );
+    },
+    getEpisodeTagText(episode) {
+      if (this.isMemberEpisode(episode)) {
+        return "会员";
+      }
+
+      return this.isPaidEpisode(episode) ? "付费" : "";
     },
     selectAll(drama = null) {
       this.setSelected(drama, () => true);
@@ -177,17 +192,25 @@ export default {
       this.setSelected(drama, () => false);
     },
     selectPaid(drama = null) {
-      this.setSelected(drama, (episode) => Number(episode.need_pay ?? 0) === 1);
+      this.setSelected(drama, (episode) => this.isPaidEpisode(episode));
     },
     selectMain(drama = null) {
       this.setSelected(drama, (episode) => this.isMainEpisode(episode));
     },
     isMainEpisode(episode) {
       const name = String(episode.name || "").trim();
+      const includes =
+        this.platform === "manbo"
+          ? MANBO_MAIN_INCLUDE_PATTERNS
+          : MISSEVAN_MAIN_INCLUDE_PATTERNS;
+      const excludes =
+        this.platform === "manbo"
+          ? MANBO_MAIN_EXCLUDE_PATTERNS
+          : MISSEVAN_MAIN_EXCLUDE_PATTERNS;
 
       return (
-        MAIN_EPISODE_INCLUDE_PATTERNS.some((pattern) => pattern.test(name)) &&
-        !MAIN_EPISODE_EXCLUDE_PATTERNS.some((pattern) => pattern.test(name))
+        includes.some((pattern) => pattern.test(name)) &&
+        !excludes.some((pattern) => pattern.test(name))
       );
     },
     getSelectedIds() {
@@ -222,7 +245,7 @@ export default {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
-  padding: 18px 20px 16px;
+  padding: 16px 18px 14px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(246, 250, 253, 0.88));
   border-bottom: 1px solid rgba(29, 53, 87, 0.08);
@@ -235,7 +258,7 @@ export default {
   align-items: center;
   justify-content: space-between;
   min-width: 0;
-  padding: 14px;
+  padding: 12px;
   background: rgba(255, 255, 255, 0.7);
   border: 1px solid rgba(47, 93, 124, 0.1);
   border-radius: 16px;
@@ -267,38 +290,26 @@ export default {
   flex: 1 1 100%;
 }
 
-.select-btn,
-.run-btn {
-  border-radius: 999px;
-  transition:
-    transform 0.18s ease,
-    box-shadow 0.18s ease,
-    background-color 0.18s ease,
-    border-color 0.18s ease;
-}
-
 .select-btn {
+  min-height: 40px;
   padding: 9px 10px;
   color: var(--select-text);
   font-size: 13px;
   font-weight: 700;
-  white-space: nowrap;
   cursor: pointer;
   background: var(--select-bg);
   border: 1px solid var(--select-border);
-}
-
-.select-btn:hover {
-  background: #e6eef8;
-  transform: translateY(-1px);
+  border-radius: 999px;
 }
 
 .select-btn-small {
+  min-height: 34px;
   padding: 6px 10px;
   font-size: 12px;
 }
 
 .run-btn {
+  min-height: 40px;
   padding: 10px 16px;
   color: #fff;
   font-size: 14px;
@@ -306,36 +317,22 @@ export default {
   cursor: pointer;
   background: linear-gradient(135deg, var(--accent), var(--accent-strong));
   border: none;
-  box-shadow: 0 10px 20px rgba(207, 92, 54, 0.2);
-}
-
-.run-btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 14px 24px rgba(207, 92, 54, 0.25);
+  border-radius: 999px;
 }
 
 .run-btn-secondary {
   background: linear-gradient(135deg, #2f5d7c, #244962);
-  box-shadow: 0 10px 20px rgba(47, 93, 124, 0.18);
-}
-
-.run-btn-secondary:hover {
-  box-shadow: 0 14px 24px rgba(47, 93, 124, 0.24);
 }
 
 .episode-list {
   max-height: 520px;
-  padding: 10px 20px 20px;
+  padding: 8px 18px 18px;
   overflow-y: auto;
 }
 
 .drama-card {
-  padding: 14px 0;
+  padding: 12px 0;
   border-bottom: 1px solid rgba(29, 53, 87, 0.08);
-}
-
-.drama-card:last-child {
-  border-bottom: none;
 }
 
 .drama-header {
@@ -377,7 +374,7 @@ export default {
 }
 
 .drama-body {
-  margin-top: 14px;
+  margin-top: 12px;
 }
 
 .episode-row {
@@ -406,11 +403,10 @@ export default {
   gap: 8px;
   align-items: baseline;
   line-height: 1.45;
-  word-break: break-word;
 }
 
 .episode-title {
-  color: var(--text-strong);
+  word-break: break-word;
 }
 
 .episode-id {
@@ -428,8 +424,13 @@ export default {
   border-radius: 999px;
 }
 
+.episode-tag-member {
+  color: #17624d;
+  background: #e6f8f1;
+}
+
 .empty-state {
-  padding: 28px 20px;
+  padding: 24px 18px;
   text-align: center;
 }
 
@@ -446,23 +447,27 @@ export default {
 @media (max-width: 640px) {
   .toolbar-shell {
     grid-template-columns: 1fr;
-    padding-left: 16px;
-    padding-right: 16px;
+    padding: 14px;
   }
 
-  .episode-list {
-    padding-left: 16px;
-    padding-right: 16px;
+  .toolbar-group {
+    align-items: stretch;
   }
 
-  .toolbar-group,
-  .drama-header {
-    align-items: flex-start;
-  }
-
-  .toolbar-actions,
-  .drama-actions {
+  .toolbar-actions {
     width: 100%;
+    gap: 6px;
+  }
+
+  .toolbar-group-run .toolbar-actions {
+    flex-wrap: nowrap;
+  }
+
+  .toolbar-group-run .run-btn {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 10px 12px;
+    font-size: 13px;
   }
 
   .toolbar-actions-select {
@@ -470,12 +475,27 @@ export default {
     gap: 6px;
   }
 
-  .select-btn {
+  .toolbar-actions-select .select-btn {
+    min-width: 0;
+    padding: 8px 6px;
     font-size: 12px;
   }
 
-  .run-btn {
+  .episode-list {
+    padding: 6px 14px 14px;
+  }
+
+  .drama-actions {
+    width: 100%;
+  }
+
+  .drama-actions .select-btn-small {
     flex: 1 1 calc(50% - 4px);
+  }
+
+  .episode-row {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
 </style>

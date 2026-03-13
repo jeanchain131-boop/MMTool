@@ -11,6 +11,9 @@ node_modules
 dist
 dist-ssr
 *.local
+release
+logs
+tmp-manbo-crypto.js
 
 # Editor directories and files
 .vscode/*
