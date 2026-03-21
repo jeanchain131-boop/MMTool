@@ -18,6 +18,7 @@
     </header>
 
     <div class="app-grid">
+      <template v-if="currentPlatform !== 'report'">
       <section class="panel panel-search">
         <SearchPanel
           :platform="currentPlatform"
@@ -66,15 +67,23 @@
           :isRunning="currentState.isRunning"
         />
       </section>
+      </template>
+
+      <section v-else class="panel panel-report panel-report-full">
+        <DesktopReportPanel />
+      </section>
     </div>
   </div>
 </template>
 
 <script>
+import { defineAsyncComponent } from "vue";
 import OutputPanel from "./components/OutputPanel.vue";
 import OptionPanel from "./components/OptionPanel.vue";
 import SearchPanel from "./components/SearchPanel.vue";
 import SearchResults from "./components/SearchResults.vue";
+
+const DesktopReportPanel = defineAsyncComponent(() => import("./components/DesktopReportPanel.vue"));
 
 function createPlatformState() {
   return {
@@ -115,7 +124,7 @@ function getDefaultAppConfig() {
 }
 
 export default {
-  components: { SearchPanel, SearchResults, OptionPanel, OutputPanel },
+  components: { SearchPanel, SearchResults, OptionPanel, OutputPanel, DesktopReportPanel },
   data() {
     return {
       currentPlatform: "missevan",
@@ -123,6 +132,7 @@ export default {
       platforms: [
         { key: "missevan", label: "Missevan" },
         { key: "manbo", label: "Manbo" },
+        { key: "report", label: "Excel 报表" },
       ],
       platformStates: {
         missevan: createPlatformState(),
@@ -132,13 +142,22 @@ export default {
   },
   computed: {
     currentState() {
+      if (this.currentPlatform === "report") {
+        return null;
+      }
       return this.platformStates[this.currentPlatform];
     },
     currentRevenueSummary() {
+      if (!this.currentState) {
+        return null;
+      }
       return this.buildRevenueSummary(this.currentState.revenueResults);
     },
     visiblePlatforms() {
       return this.platforms.filter((platform) => {
+        if (platform.key === "report") {
+          return this.appConfig.desktopApp;
+        }
         return platform.key !== "missevan" || this.appConfig.missevanEnabled;
       });
     },
@@ -185,6 +204,9 @@ export default {
       };
       if (!this.appConfig.missevanEnabled && this.currentPlatform === "missevan") {
         this.currentPlatform = "manbo";
+      }
+      if (!this.appConfig.desktopApp && this.currentPlatform === "report") {
+        this.currentPlatform = this.appConfig.missevanEnabled ? "missevan" : "manbo";
       }
       this.updateDocumentTitle();
     },
@@ -1437,6 +1459,9 @@ body {
   border-radius: 20px;
   box-shadow: var(--panel-shadow);
 }
+.panel-report-full {
+  padding: 18px;
+}
 @media (max-width: 640px) {
   .app-shell { padding: 14px 10px 48px; }
   .hero { padding: 18px 16px; border-radius: 20px; }
@@ -1445,8 +1470,11 @@ body {
   .platform-switch {
     display: grid;
     width: 100%;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
   .platform-btn { width: 100%; }
+  .panel-report-full {
+    padding: 14px;
+  }
 }
 </style>

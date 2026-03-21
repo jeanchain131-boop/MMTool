@@ -602,7 +602,45 @@ async function fetchDramaInfo(dramaId, soundId = null) {
   );
 
   if (data.success && data.info) {
-    const normalized = normalizeMissevanDramaInfo(data.info);
+    let normalized = normalizeMissevanDramaInfo(data.info);
+    const resolvedSoundId = Number(
+      soundId ?? normalized?.episodes?.episode?.[0]?.sound_id
+    );
+
+    if (
+      !soundId
+      && normalized
+      && Number(normalized?.drama?.subscription_num ?? 0) <= 0
+      && resolvedSoundId > 0
+    ) {
+      try {
+        const bySoundData = await fetchJsonWithRetry(
+          `https://www.missevan.com/dramaapi/getdramabysound?sound_id=${resolvedSoundId}`,
+          2,
+          250,
+          { missevan: true }
+        );
+        if (bySoundData?.success && bySoundData?.info) {
+          const bySoundNormalized = normalizeMissevanDramaInfo(bySoundData.info);
+          const bySoundSubscriptionNum = Number(bySoundNormalized?.drama?.subscription_num ?? 0);
+          if (bySoundSubscriptionNum > 0) {
+            normalized = {
+              ...normalized,
+              drama: {
+                ...normalized.drama,
+                subscription_num: bySoundSubscriptionNum,
+              },
+            };
+          }
+        }
+      } catch (error) {
+        console.error(
+          `Failed to backfill Missevan subscription_num drama_id=${dramaId} sound_id=${resolvedSoundId}`,
+          error
+        );
+      }
+    }
+
     setCachedValue(dramaCache, cacheKey, normalized);
 
     const resolvedDramaId = Number(normalized?.drama?.id ?? dramaId);
@@ -610,9 +648,6 @@ async function fetchDramaInfo(dramaId, soundId = null) {
       setCachedValue(dramaCache, `drama:${resolvedDramaId}`, normalized);
     }
 
-    const resolvedSoundId = Number(
-      soundId ?? normalized?.episodes?.episode?.[0]?.sound_id
-    );
     if (resolvedSoundId > 0) {
       setCachedValue(dramaCache, `sound:${resolvedSoundId}`, normalized);
     }
@@ -696,9 +731,22 @@ function normalizeOptionalFiniteNumber(value) {
 
 async function fetchDanmakuSummary(soundId, dramaTitle) {
   const cacheKey = String(soundId);
-  if (danmakuCache.has(cacheKey)) {
+  const cached = getCachedValue(danmakuCache, cacheKey, SOUND_SUMMARY_CACHE_TTL_MS);
+  if (cached) {
+    void writeUsageLog({
+      platform: "missevan",
+      action: "danmaku_summary",
+      soundId: Number(soundId),
+      dramaTitle,
+      success: Boolean(cached.success),
+      danmaku: Number(cached.danmaku ?? 0),
+      userCount: Array.isArray(cached.users) ? cached.users.length : 0,
+      accessDenied: Boolean(cached.accessDenied),
+      cached: true,
+      error: cached.error || "",
+    });
     return {
-      ...danmakuCache.get(cacheKey),
+      ...cached,
       drama_title: dramaTitle,
     };
   }
@@ -732,7 +780,19 @@ async function fetchDanmakuSummary(soundId, dramaTitle) {
       error: "",
     };
 
-    danmakuCache.set(cacheKey, cachedResult);
+    setCachedValue(danmakuCache, cacheKey, cachedResult);
+    void writeUsageLog({
+      platform: "missevan",
+      action: "danmaku_summary",
+      soundId: Number(soundId),
+      dramaTitle,
+      success: true,
+      danmaku: lines.length,
+      userCount: users.size,
+      accessDenied: false,
+      cached: false,
+      error: "",
+    });
 
     return {
       ...cachedResult,
@@ -741,6 +801,21 @@ async function fetchDanmakuSummary(soundId, dramaTitle) {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`Failed to fetch Missevan danmaku sound_id=${soundId}: ${message}`);
+    const accessDenied =
+      isAccessDeniedError(error) ||
+      String(message).startsWith("ACCESS_DENIED_COOLDOWN:");
+    void writeUsageLog({
+      platform: "missevan",
+      action: "danmaku_summary",
+      soundId: Number(soundId),
+      dramaTitle,
+      success: false,
+      danmaku: 0,
+      userCount: 0,
+      accessDenied,
+      cached: false,
+      error: message,
+    });
 
     return {
       success: false,
@@ -748,9 +823,7 @@ async function fetchDanmakuSummary(soundId, dramaTitle) {
       drama_title: dramaTitle,
       danmaku: 0,
       users: [],
-      accessDenied:
-        isAccessDeniedError(error) ||
-        String(message).startsWith("ACCESS_DENIED_COOLDOWN:"),
+      accessDenied,
       error: message,
     };
   }
@@ -1319,6 +1392,18 @@ async function fetchManboDanmakuSummary(setId, dramaTitle) {
     MANBO_DANMAKU_CACHE_TTL_MS
   );
   if (cached) {
+    void writeUsageLog({
+      platform: "manbo",
+      action: "danmaku_summary",
+      soundId: String(setId),
+      dramaTitle,
+      success: Boolean(cached.success),
+      danmaku: Number(cached.danmaku ?? 0),
+      userCount: Array.isArray(cached.users) ? cached.users.length : 0,
+      accessDenied: Boolean(cached.accessDenied),
+      cached: true,
+      error: cached.error || "",
+    });
     return {
       ...cached,
       drama_title: dramaTitle,
@@ -1384,6 +1469,18 @@ async function fetchManboDanmakuSummary(setId, dramaTitle) {
     };
 
     setCachedValue(manboDanmakuCache, setId, summary);
+    void writeUsageLog({
+      platform: "manbo",
+      action: "danmaku_summary",
+      soundId: String(setId),
+      dramaTitle,
+      success: true,
+      danmaku: totalDanmaku,
+      userCount: users.size,
+      accessDenied: false,
+      cached: false,
+      error: "",
+    });
 
     return {
       ...summary,
@@ -1392,6 +1489,21 @@ async function fetchManboDanmakuSummary(setId, dramaTitle) {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`Failed to fetch Manbo danmaku set_id=${setId}: ${message}`);
+    const accessDenied =
+      isAccessDeniedError(error) ||
+      String(message).startsWith("ACCESS_DENIED_COOLDOWN:");
+    void writeUsageLog({
+      platform: "manbo",
+      action: "danmaku_summary",
+      soundId: String(setId),
+      dramaTitle,
+      success: false,
+      danmaku: 0,
+      userCount: 0,
+      accessDenied,
+      cached: false,
+      error: message,
+    });
 
     return {
       success: false,
@@ -1399,9 +1511,7 @@ async function fetchManboDanmakuSummary(setId, dramaTitle) {
       drama_title: dramaTitle,
       danmaku: 0,
       users: [],
-      accessDenied:
-        isAccessDeniedError(error) ||
-        String(message).startsWith("ACCESS_DENIED_COOLDOWN:"),
+      accessDenied,
       error: message,
     };
   }
@@ -1851,6 +1961,40 @@ app.post("/getrewardsummary", async (req, res) => {
       success: false,
       drama_id: dramaId,
       rewardCoinTotal: 0,
+      accessDenied:
+        isAccessDeniedError(error) ||
+        String(message).startsWith("ACCESS_DENIED_COOLDOWN:"),
+      error: message,
+    });
+  }
+});
+
+app.post("/getrewardmeta", async (req, res) => {
+  if (!ensureMissevanEnabled(res)) {
+    return;
+  }
+  const dramaId = Number(req.body.drama_id ?? 0);
+
+  if (!dramaId) {
+    return res.json({
+      success: false,
+      drama_id: 0,
+      reward_num: null,
+      accessDenied: false,
+      error: "Missing drama_id",
+    });
+  }
+
+  try {
+    const result = await fetchRewardDetailMeta(dramaId);
+    return res.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`Failed to fetch reward meta drama_id=${dramaId}`, error);
+    return res.json({
+      success: false,
+      drama_id: dramaId,
+      reward_num: null,
       accessDenied:
         isAccessDeniedError(error) ||
         String(message).startsWith("ACCESS_DENIED_COOLDOWN:"),
