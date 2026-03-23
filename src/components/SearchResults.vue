@@ -63,7 +63,7 @@
       <div class="empty-text">
         {{
           platform === "manbo"
-            ? "先粘贴 Manbo 的 ID 或链接，再把结果导入到这里。"
+            ? "先搜索已收录的漫播索引库，或继续粘贴 Manbo 的 ID / 链接导入。"
             : "先搜索关键词，或直接输入作品 ID 后将结果导入到这里。"
         }}
       </div>

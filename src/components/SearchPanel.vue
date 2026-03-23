@@ -23,6 +23,21 @@
       </div>
     </div>
 
+    <div v-else class="search-card">
+      <label class="field-label" for="manbo-keyword-input">搜索已收录的漫播索引库</label>
+      <div class="search-block">
+        <input
+          id="manbo-keyword-input"
+          v-model="manboKeyword"
+          type="text"
+          class="search-input"
+          placeholder="输入剧名、别名或 Drama ID"
+          @keyup.enter="search"
+        />
+        <button class="primary-btn" @click="search">搜索</button>
+      </div>
+    </div>
+
     <div class="search-card" :class="{ 'search-card-muted': platform === 'manbo' }">
       <label class="field-label" for="manual-input">{{ manualLabel }}</label>
       <div class="search-block">
@@ -74,6 +89,7 @@ export default {
   data() {
     return {
       keyword: "",
+      manboKeyword: "",
       manualInput: "",
     };
   },
@@ -83,12 +99,12 @@ export default {
     },
     panelTitle() {
       return this.platform === "manbo"
-        ? "粘贴 ID、网页链接或分享链接"
+        ? "先搜索本地库，再查看完整信息"
         : "先搜索，再批量导入";
     },
     panelTip() {
       if (this.platform === "manbo") {
-        return "支持作品 ID、分集 ID、kilamanbo 网页链接，以及带 _specific_parameter 的分享链接。";
+        return "可先搜索已收录的漫播索引库，命中后会自动拉取剧集信息并展示；没有结果时，再用作品 ID、分集 ID、网页链接或分享链接导入。";
       }
 
       return this.getMissevanAccessLimitedText();
@@ -110,6 +126,7 @@ export default {
   methods: {
     clearManualInput() {
       this.keyword = "";
+      this.manboKeyword = "";
       this.manualInput = "";
     },
     async fetchAppConfig() {
@@ -164,7 +181,36 @@ export default {
       );
     },
     async search() {
-      if (this.platform !== "missevan" || !this.keyword.trim()) {
+      if (this.platform === "manbo") {
+        const keyword = this.manboKeyword.trim();
+        if (!keyword) {
+          return;
+        }
+
+        this.$emit("resetState");
+
+        try {
+          const response = await fetch(
+            `/manbo/search?keyword=${encodeURIComponent(keyword)}`
+          );
+          const data = await response.json();
+
+          this.$emit("updateResults", Array.isArray(data.results) ? data.results : []);
+          if (!data.success) {
+            if (Number(data?.meta?.matchedCount ?? 0) > 0) {
+              alert("本地索引有记录，但拉取漫播详情失败，请稍后重试或手动导入。");
+            } else {
+              alert("漫播索引库没有搜索结果，可以继续用 ID 或链接导入，成功后会自动收录。");
+            }
+          }
+        } catch (error) {
+          console.error(error);
+          alert("漫播索引搜索失败，请稍后重试");
+        }
+        return;
+      }
+
+      if (!this.keyword.trim()) {
         return;
       }
 

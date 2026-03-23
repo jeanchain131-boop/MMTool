@@ -421,11 +421,19 @@ export default {
       return response.json();
     },
     async getJson(url, signal, errorMessage) {
-      const response = await fetch(url, { signal });
+      const response = await fetch(url, {
+        signal,
+        cache: "no-store",
+      });
       if (!response.ok) {
         throw new Error(`${errorMessage}: ${response.status}`);
       }
       return response.json();
+    },
+    buildTaskSnapshotUrl(taskId) {
+      const normalizedTaskId = String(taskId ?? "").trim();
+      const cacheBust = `_ts=${Date.now()}`;
+      return `/stat-tasks/${normalizedTaskId}?${cacheBust}`;
     },
     async waitForTaskPoll(signal, delayMs = 2000) {
       return new Promise((resolve, reject) => {
@@ -476,14 +484,32 @@ export default {
         "Failed to create stats task"
       );
       if (!this.isRunActive(state, runId)) return;
-      state.activeTaskId = task.taskId;
+      const taskId = String(task.taskId ?? "").trim();
+      state.activeTaskId = taskId;
       state.activeTaskType = task.taskType || taskType;
       this.applyTaskSnapshot(state, task);
+      if (!taskId) {
+        throw new Error("Stats task missing taskId");
+      }
 
-      while (this.isRunActive(state, runId) && state.activeTaskId) {
+      const initialSnapshot = await this.getJson(
+        this.buildTaskSnapshotUrl(taskId),
+        signal,
+        "Failed to fetch stats task"
+      );
+      if (!this.isRunActive(state, runId)) return;
+      this.applyTaskSnapshot(state, initialSnapshot);
+      if (initialSnapshot.status === "completed" || initialSnapshot.status === "cancelled") {
+        return;
+      }
+      if (initialSnapshot.status === "failed") {
+        throw new Error(initialSnapshot.error || "Stats task failed");
+      }
+
+      while (this.isRunActive(state, runId) && state.activeTaskId === taskId) {
         await this.waitForTaskPoll(signal);
         const snapshot = await this.getJson(
-          `/stat-tasks/${state.activeTaskId}`,
+          this.buildTaskSnapshotUrl(taskId),
           signal,
           "Failed to fetch stats task"
         );

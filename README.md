@@ -3,7 +3,7 @@
 一个基于 Vue 3 + Express 的网页端 / 桌面端工具，用于：
 
 - `Missevan` 的搜索、作品导入、弹幕统计、播放量统计、最低收益预估
-- `Manbo` 的作品导入、分集筛选、弹幕统计、去重 ID 统计
+- `Manbo` 的本地索引搜索、作品导入、分集筛选、弹幕统计、去重 ID 统计
 
 ## 本地启动
 
@@ -31,6 +31,11 @@ Windows 桌面版会直接在界面中提示这一步。
 - `ENABLE_MISSEVAN=false`：隐藏 `Missevan`，并禁用相关后端接口
 - `MISSEVAN_COOLDOWN_HOURS=4`：线上环境猫耳 418 冷却时间，默认 4 小时
 - `PORT`：服务监听端口，Render / Railway 会自动注入
+- `UPSTASH_REDIS_REST_URL`：可选，配置后用于持久化 Manbo 轻量索引库
+- `UPSTASH_REDIS_REST_TOKEN`：可选，配合 Upstash Redis 持久化 Manbo 轻量索引库
+- `MANBO_INDEX_SYNC_INTERVAL_MS=30000`：可选，多实例环境下刷新远端 Manbo 索引快照的间隔
+
+未配置 Upstash 时，Manbo 轻量索引库会回退到运行目录下的 `runtime/manbo-index.json`。
 
 ## Render 部署
 
