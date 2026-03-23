@@ -2,6 +2,7 @@
 import cors from "cors";
 import express from "express";
 import fetch from "node-fetch";
+import https from "https";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -26,6 +27,7 @@ const MISSEVAN_COOLDOWN_MS = MISSEVAN_COOLDOWN_HOURS * 60 * 60 * 1000;
 const COOLDOWN_STATE_PATH = path.join(runtimeDir, "missevan-cooldown.json");
 
 const MANBO_API_BASE = "https://www.kilamanbo.com/web_manbo";
+const MANBO_API_HOST = "www.kilamanbo.com";
 
 const danmakuCache = new Map();
 const dramaCache = new Map();
@@ -35,6 +37,7 @@ const rewardDetailCache = new Map();
 const manboDramaCache = new Map();
 const manboSetCache = new Map();
 const manboDanmakuCache = new Map();
+const manboDanmakuInFlight = new Map();
 const manboStatsTaskStore = new Map();
 
 const DRAMA_CACHE_TTL_MS = 30 * 60 * 1000;
@@ -46,6 +49,25 @@ const MANBO_SET_CACHE_TTL_MS = 30 * 60 * 1000;
 const MANBO_DANMAKU_CACHE_TTL_MS = 30 * 60 * 1000;
 const MANBO_STATS_TASK_TTL_MS = 60 * 60 * 1000;
 const MANBO_STATS_TASK_HEARTBEAT_TIMEOUT_MS = 5 * 60 * 1000;
+const MANBO_DANMAKU_PAGE_CONCURRENCY = Math.max(
+  1,
+  Number(process.env.MANBO_DANMAKU_PAGE_CONCURRENCY ?? 12) || 12
+);
+const MANBO_STATS_EPISODE_CONCURRENCY = Math.max(
+  1,
+  Number(process.env.MANBO_STATS_EPISODE_CONCURRENCY ?? 4) || 4
+);
+const MANBO_FETCH_TIMEOUT_MS = Math.max(
+  1000,
+  Number(process.env.MANBO_FETCH_TIMEOUT_MS ?? 10000) || 10000
+);
+const manboHttpsAgent = new https.Agent({
+  keepAlive: true,
+  maxSockets: Math.max(
+    8,
+    MANBO_DANMAKU_PAGE_CONCURRENCY * MANBO_STATS_EPISODE_CONCURRENCY * 2
+  ),
+});
 
 let accessDeniedUntil = 0;
 let cooldownStateLoaded = false;
@@ -77,7 +99,7 @@ function createTaskId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function cleanupExpiredManboStatsTasks() {
+function cleanupExpiredStatsTasks() {
   const now = Date.now();
   for (const [taskId, task] of manboStatsTaskStore.entries()) {
     const updatedAt = Number(task?.updatedAt ?? task?.createdAt ?? 0);
@@ -87,9 +109,11 @@ function cleanupExpiredManboStatsTasks() {
   }
 }
 
-function buildManboTaskSnapshot(task) {
+function buildStatsTaskSnapshot(task) {
   return {
     taskId: task.taskId,
+    platform: task.platform,
+    taskType: task.taskType,
     status: task.status,
     progress: task.progress,
     currentAction: task.currentAction,
@@ -99,7 +123,10 @@ function buildManboTaskSnapshot(task) {
     totalDanmaku: task.totalDanmaku,
     totalUsers: task.totalUsers,
     accessDenied: task.accessDenied,
-    result: task.status === "completed" ? task.result : null,
+    result:
+      task.status === "completed" || task.status === "cancelled"
+        ? task.result
+        : null,
     error: task.error || "",
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
@@ -107,11 +134,11 @@ function buildManboTaskSnapshot(task) {
   };
 }
 
-function updateManboTask(task, patch) {
+function updateStatsTask(task, patch) {
   Object.assign(task, patch, { updatedAt: Date.now() });
 }
 
-function refreshManboTaskHeartbeat(task) {
+function refreshStatsTaskHeartbeat(task) {
   task.lastSeenAt = Date.now();
   task.updatedAt = task.lastSeenAt;
 }
@@ -455,6 +482,38 @@ async function writeUsageLog(entry) {
   }
 }
 
+function createTimeoutSignal(timeoutMs) {
+  const normalizedTimeout = Number(timeoutMs);
+  if (!Number.isFinite(normalizedTimeout) || normalizedTimeout <= 0) {
+    return { signal: undefined, cleanup: () => {} };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => {
+    controller.abort(new Error(`Request timeout after ${normalizedTimeout}ms`));
+  }, normalizedTimeout);
+
+  return {
+    signal: controller.signal,
+    cleanup: () => clearTimeout(timer),
+  };
+}
+
+function buildFetchOptions(url, options = {}) {
+  const targetUrl = typeof url === "string" ? new URL(url) : url;
+  const fetchOptions = {
+    headers: options.headers,
+    signal: options.signal,
+    agent: options.agent,
+  };
+
+  if (!fetchOptions.agent && targetUrl.hostname === MANBO_API_HOST) {
+    fetchOptions.agent = manboHttpsAgent;
+  }
+
+  return fetchOptions;
+}
+
 async function fetchJsonWithRetry(url, retries = 2, delayMs = 250, options = {}) {
   if (options.missevan && isInAccessDeniedCooldown()) {
     throw createCooldownError();
@@ -463,8 +522,16 @@ async function fetchJsonWithRetry(url, retries = 2, delayMs = 250, options = {})
   let lastError;
 
   for (let attempt = 0; attempt <= retries; attempt += 1) {
+    const { signal, cleanup } = createTimeoutSignal(options.timeoutMs);
+
     try {
-      const response = await fetch(url);
+      const response = await fetch(
+        url,
+        buildFetchOptions(url, {
+          ...options,
+          signal,
+        })
+      );
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
@@ -480,6 +547,8 @@ async function fetchJsonWithRetry(url, retries = 2, delayMs = 250, options = {})
       if (attempt < retries) {
         await sleep(delayMs * (attempt + 1));
       }
+    } finally {
+      cleanup();
     }
   }
 
@@ -494,8 +563,16 @@ async function fetchTextWithRetry(url, retries = 2, delayMs = 250, options = {})
   let lastError;
 
   for (let attempt = 0; attempt <= retries; attempt += 1) {
+    const { signal, cleanup } = createTimeoutSignal(options.timeoutMs);
+
     try {
-      const response = await fetch(url);
+      const response = await fetch(
+        url,
+        buildFetchOptions(url, {
+          ...options,
+          signal,
+        })
+      );
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
@@ -511,6 +588,8 @@ async function fetchTextWithRetry(url, retries = 2, delayMs = 250, options = {})
       if (attempt < retries) {
         await sleep(delayMs * (attempt + 1));
       }
+    } finally {
+      cleanup();
     }
   }
 
@@ -1410,111 +1489,137 @@ async function fetchManboDanmakuSummary(setId, dramaTitle) {
     };
   }
 
-  try {
-    const pageSize = 200;
-    const users = new Set();
-    const firstPageData = await fetchJsonWithRetry(
-      `${MANBO_API_BASE}/getDanmaKuPgList?pageSize=${pageSize}&dramaSetId=${setId}&pageNo=1`
-    );
-    const firstPayload = firstPageData?.data || {};
-    const firstList = Array.isArray(firstPayload.list) ? firstPayload.list : [];
-    const totalDanmaku = Math.max(
-      0,
-      Number(firstPayload.count ?? firstList.length ?? 0)
-    );
-    const totalPages = totalDanmaku > 0 ? Math.ceil(totalDanmaku / pageSize) : 1;
-
-    firstList.forEach((item) => {
-      if (item?.eid) {
-        users.add(String(item.eid));
-      }
-    });
-
-    for (let startPage = 2; startPage <= totalPages; startPage += 6) {
-      const pageNumbers = [];
-      for (
-        let pageNo = startPage;
-        pageNo < startPage + 6 && pageNo <= totalPages;
-        pageNo += 1
-      ) {
-        pageNumbers.push(pageNo);
-      }
-
-      const pages = await Promise.all(
-        pageNumbers.map((pageNo) =>
-          fetchJsonWithRetry(
-            `${MANBO_API_BASE}/getDanmaKuPgList?pageSize=${pageSize}&dramaSetId=${setId}&pageNo=${pageNo}`
-          )
-        )
-      );
-
-      pages.forEach((data) => {
-        const payload = data?.data || {};
-        const list = Array.isArray(payload.list) ? payload.list : [];
-        list.forEach((item) => {
-          if (item?.eid) {
-            users.add(String(item.eid));
-          }
-        });
-      });
-    }
-
-    const summary = {
-      success: true,
-      sound_id: String(setId),
-      danmaku: totalDanmaku,
-      users: [...users],
-      accessDenied: false,
-      error: "",
-    };
-
-    setCachedValue(manboDanmakuCache, setId, summary);
-    void writeUsageLog({
-      platform: "manbo",
-      action: "danmaku_summary",
-      soundId: String(setId),
-      dramaTitle,
-      success: true,
-      danmaku: totalDanmaku,
-      userCount: users.size,
-      accessDenied: false,
-      cached: false,
-      error: "",
-    });
-
+  const inFlight = manboDanmakuInFlight.get(String(setId));
+  if (inFlight) {
+    const result = await inFlight;
     return {
-      ...summary,
+      ...result,
       drama_title: dramaTitle,
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`Failed to fetch Manbo danmaku set_id=${setId}: ${message}`);
-    const accessDenied =
-      isAccessDeniedError(error) ||
-      String(message).startsWith("ACCESS_DENIED_COOLDOWN:");
-    void writeUsageLog({
-      platform: "manbo",
-      action: "danmaku_summary",
-      soundId: String(setId),
-      dramaTitle,
-      success: false,
-      danmaku: 0,
-      userCount: 0,
-      accessDenied,
-      cached: false,
-      error: message,
-    });
-
-    return {
-      success: false,
-      sound_id: String(setId),
-      drama_title: dramaTitle,
-      danmaku: 0,
-      users: [],
-      accessDenied,
-      error: message,
     };
   }
+
+  const summaryPromise = (async () => {
+    const startedAt = Date.now();
+
+    try {
+      const pageSize = 200;
+      const users = new Set();
+      const pageFetchOptions = {
+        timeoutMs: MANBO_FETCH_TIMEOUT_MS,
+      };
+      const firstPageData = await fetchJsonWithRetry(
+        `${MANBO_API_BASE}/getDanmaKuPgList?pageSize=${pageSize}&dramaSetId=${setId}&pageNo=1`,
+        2,
+        250,
+        pageFetchOptions
+      );
+      const firstPayload = firstPageData?.data || {};
+      const firstList = Array.isArray(firstPayload.list) ? firstPayload.list : [];
+      const totalDanmaku = Math.max(
+        0,
+        Number(firstPayload.count ?? firstList.length ?? 0)
+      );
+      const totalPages =
+        totalDanmaku > 0 ? Math.ceil(totalDanmaku / pageSize) : 1;
+
+      firstList.forEach((item) => {
+        if (item?.eid) {
+          users.add(String(item.eid));
+        }
+      });
+
+      const remainingPages = Array.from(
+        { length: Math.max(0, totalPages - 1) },
+        (_, index) => index + 2
+      );
+
+      await runWithConcurrency(
+        remainingPages,
+        MANBO_DANMAKU_PAGE_CONCURRENCY,
+        async (pageNo) => {
+          const data = await fetchJsonWithRetry(
+            `${MANBO_API_BASE}/getDanmaKuPgList?pageSize=${pageSize}&dramaSetId=${setId}&pageNo=${pageNo}`,
+            2,
+            250,
+            pageFetchOptions
+          );
+          const payload = data?.data || {};
+          const list = Array.isArray(payload.list) ? payload.list : [];
+          list.forEach((item) => {
+            if (item?.eid) {
+              users.add(String(item.eid));
+            }
+          });
+        }
+      );
+
+      const summary = {
+        success: true,
+        sound_id: String(setId),
+        danmaku: totalDanmaku,
+        users: [...users],
+        accessDenied: false,
+        error: "",
+      };
+
+      setCachedValue(manboDanmakuCache, setId, summary);
+      void writeUsageLog({
+        platform: "manbo",
+        action: "danmaku_summary",
+        soundId: String(setId),
+        dramaTitle,
+        success: true,
+        danmaku: totalDanmaku,
+        userCount: users.size,
+        accessDenied: false,
+        cached: false,
+        error: "",
+        pageConcurrency: MANBO_DANMAKU_PAGE_CONCURRENCY,
+        totalPages,
+        durationMs: Date.now() - startedAt,
+      });
+
+      return {
+        ...summary,
+        drama_title: dramaTitle,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`Failed to fetch Manbo danmaku set_id=${setId}: ${message}`);
+      const accessDenied =
+        isAccessDeniedError(error) ||
+        String(message).startsWith("ACCESS_DENIED_COOLDOWN:");
+      void writeUsageLog({
+        platform: "manbo",
+        action: "danmaku_summary",
+        soundId: String(setId),
+        dramaTitle,
+        success: false,
+        danmaku: 0,
+        userCount: 0,
+        accessDenied,
+        cached: false,
+        error: message,
+        pageConcurrency: MANBO_DANMAKU_PAGE_CONCURRENCY,
+        durationMs: Date.now() - startedAt,
+      });
+
+      return {
+        success: false,
+        sound_id: String(setId),
+        drama_title: dramaTitle,
+        danmaku: 0,
+        users: [],
+        accessDenied,
+        error: message,
+      };
+    } finally {
+      manboDanmakuInFlight.delete(String(setId));
+    }
+  })();
+
+  manboDanmakuInFlight.set(String(setId), summaryPromise);
+  return summaryPromise;
 }
 
 async function runWithConcurrency(items, limit, worker) {
@@ -1536,11 +1641,8 @@ async function runWithConcurrency(items, limit, worker) {
   await Promise.all(runners);
 }
 
-async function executeManboStatsTask(task) {
-  const episodes = Array.isArray(task.episodes) ? task.episodes : [];
+function buildIdDramaMap(episodes) {
   const dramaMap = new Map();
-  const allUsers = new Set();
-
   episodes.forEach((episode) => {
     const title = String(episode?.drama_title ?? "").trim() || "Unknown";
     if (!dramaMap.has(title)) {
@@ -1551,29 +1653,274 @@ async function executeManboStatsTask(task) {
         userSet: new Set(),
       });
     }
-
     dramaMap.get(title).selectedEpisodeCount += 1;
   });
+  return dramaMap;
+}
 
-  updateManboTask(task, {
+function buildPlayCountDramaMap(episodes) {
+  const dramaMap = new Map();
+  episodes.forEach((episode) => {
+    const title = String(episode?.drama_title ?? "").trim() || "Unknown";
+    if (!dramaMap.has(title)) {
+      dramaMap.set(title, {
+        title,
+        selectedEpisodeCount: 0,
+        playCountTotal: 0,
+        playCountFailed: false,
+      });
+    }
+    dramaMap.get(title).selectedEpisodeCount += 1;
+  });
+  return dramaMap;
+}
+
+function createRevenueSummary(results) {
+  const safeResults = Array.isArray(results) ? results : [];
+  const totalPaidUserSet = new Set();
+  let totalViewCount = 0;
+  let rewardTotal = 0;
+  let rewardNum = 0;
+  let hasRewardNum = false;
+  let estimatedRevenueYuan = 0;
+  let minRevenueYuan = null;
+  let maxRevenueYuan = null;
+  let hasRange = false;
+  let failed = false;
+  let platform = safeResults[0]?.platform || "";
+
+  safeResults.forEach((item) => {
+    platform = platform || item?.platform || "";
+    (Array.isArray(item?.paidUserIds) ? item.paidUserIds : []).forEach((uid) => {
+      if (uid != null && uid !== "") {
+        totalPaidUserSet.add(String(uid));
+      }
+    });
+    totalViewCount += Number(item?.viewCount ?? 0);
+    rewardTotal += platform === "manbo"
+      ? Number(item?.diamondValue ?? 0)
+      : Number(item?.rewardCoinTotal ?? 0);
+    const normalizedRewardNum = normalizeOptionalFiniteNumber(item?.rewardNum);
+    if (normalizedRewardNum != null) {
+      rewardNum += normalizedRewardNum;
+      hasRewardNum = true;
+    }
+    failed = failed || Boolean(item?.failed);
+    const estimatedAmount = Number(item?.estimatedRevenueYuan ?? 0);
+    estimatedRevenueYuan += estimatedAmount;
+
+    const itemHasRange =
+      Number.isFinite(Number(item?.minRevenueYuan)) &&
+      Number.isFinite(Number(item?.maxRevenueYuan));
+    if (itemHasRange) {
+      if (!hasRange) {
+        minRevenueYuan = estimatedRevenueYuan - estimatedAmount;
+        maxRevenueYuan = estimatedRevenueYuan - estimatedAmount;
+      }
+      hasRange = true;
+      minRevenueYuan = Number(minRevenueYuan ?? 0) + Number(item.minRevenueYuan ?? 0);
+      maxRevenueYuan = Number(maxRevenueYuan ?? 0) + Number(item.maxRevenueYuan ?? 0);
+    } else if (hasRange) {
+      minRevenueYuan = Number(minRevenueYuan ?? 0) + estimatedAmount;
+      maxRevenueYuan = Number(maxRevenueYuan ?? 0) + estimatedAmount;
+    }
+  });
+
+  return {
+    platform,
+    selectedDramaCount: safeResults.length,
+    totalPaidUserCount: totalPaidUserSet.size,
+    totalViewCount,
+    rewardTotal,
+    rewardNum: platform === "missevan" && hasRewardNum ? rewardNum : null,
+    estimatedRevenueYuan,
+    minRevenueYuan: hasRange ? minRevenueYuan : null,
+    maxRevenueYuan: hasRange ? maxRevenueYuan : null,
+    failed,
+    summaryTitle: "",
+  };
+}
+
+function getManboRevenueType(info) {
+  const drama = info?.drama || {};
+  const episodes = Array.isArray(info?.episodes?.episode) ? info.episodes.episode : [];
+  const allEpisodesFree = episodes.every((episode) => {
+    return Number(episode?.pay_type ?? 0) === 0 && Number(episode?.price ?? 0) === 0;
+  });
+  const hasVipFreeEpisode = episodes.some((episode) => Number(episode?.vip_free ?? 0) === 1);
+  if (
+    Number(drama.pay_type ?? 0) === 0 &&
+    Number(drama.price ?? 0) === 0 &&
+    allEpisodesFree &&
+    hasVipFreeEpisode
+  ) {
+    return "member";
+  }
+  if (
+    Number(drama.pay_type ?? 0) === 1 &&
+    Number(drama.price ?? 0) > 0 &&
+    Number(drama.member_price ?? 0) > 0
+  ) {
+    return "season";
+  }
+  if (
+    Number(drama.pay_type ?? 0) === 0 &&
+    Number(drama.price ?? 0) === 0 &&
+    episodes.some((episode) => Number(episode?.price ?? 0) > 0)
+  ) {
+    return "episode";
+  }
+  return "unknown";
+}
+
+function getManboRevenueEpisodes(info, revenueType) {
+  const episodes = Array.isArray(info?.episodes?.episode) ? info.episodes.episode : [];
+  if (revenueType === "member") {
+    return episodes.filter((episode) => Number(episode?.vip_free ?? 0) === 1);
+  }
+  if (revenueType === "season") {
+    return episodes.filter((episode) => Number(episode?.pay_type ?? 0) === 1);
+  }
+  if (revenueType === "episode") {
+    return episodes.filter((episode) => Number(episode?.price ?? 0) > 0);
+  }
+  return [];
+}
+
+function getManboRevenueSubtitle(title, dramaInfo, revenueType, episodes) {
+  const drama = dramaInfo?.drama || {};
+  if (revenueType === "member") {
+    return `${title} / 会员剧（仅计算投喂）`;
+  }
+  if (revenueType === "season") {
+    return `${title} / 全季${Number(drama.price ?? 0)}（折后${Number(drama.member_price ?? 0)}）红豆`;
+  }
+  if (revenueType === "episode") {
+    const prices = [...new Set(
+      episodes.map((episode) => Number(episode?.price ?? 0)).filter((price) => price > 0)
+    )];
+    return prices.length === 1
+      ? `${title} / 每集${prices[0]}红豆`
+      : `${title} / 分集付费红豆`;
+  }
+  return `${title} / 暂不支持收益预估`;
+}
+
+async function finalizeCancelledTask(task, patch = {}) {
+  updateStatsTask(task, {
+    status: "cancelled",
+    currentAction: patch.currentAction || "统计已取消",
+    result: patch.result ?? task.result ?? null,
+    ...patch,
+  });
+}
+
+async function executeMissevanIdTask(task) {
+  const episodes = Array.isArray(task.episodes) ? task.episodes : [];
+  const dramaMap = buildIdDramaMap(episodes);
+  const allUsers = new Set();
+
+  updateStatsTask(task, {
     status: "running",
     currentAction: "开始统计弹幕与去重 ID",
     progress: 0,
+    totalDanmaku: 0,
+    totalUsers: 0,
   });
 
-  try {
-    await runWithConcurrency(episodes, 4, async (episode) => {
-      if (task.cancelled || hasManboTaskHeartbeatExpired(task)) {
-        task.cancelled = true;
+  await runWithConcurrency(episodes, 3, async (episode) => {
+    if (task.cancelled) {
+      return;
+    }
+    const soundId = Number(episode?.sound_id ?? 0);
+    const dramaTitle = String(episode?.drama_title ?? "").trim() || "Unknown";
+    try {
+      const result = await fetchDanmakuSummary(soundId, dramaTitle);
+      if (result.success) {
+        const drama = dramaMap.get(dramaTitle);
+        if (drama) {
+          drama.danmaku += Number(result.danmaku ?? 0);
+          result.users.forEach((uid) => {
+            drama.userSet.add(uid);
+            allUsers.add(uid);
+          });
+        }
+        task.totalDanmaku += Number(result.danmaku ?? 0);
+      } else {
+        task.failedCount += 1;
+        if (result.accessDenied) {
+          task.accessDenied = true;
+        }
+      }
+    } catch (error) {
+      task.failedCount += 1;
+      if (isAccessDeniedError(error)) {
+        task.accessDenied = true;
+      }
+    }
+    task.completedCount += 1;
+    updateStatsTask(task, {
+      progress: task.totalCount > 0
+        ? Math.floor((task.completedCount / task.totalCount) * 100)
+        : 100,
+      currentAction: `统计 ID ${task.completedCount}/${task.totalCount}`,
+      totalUsers: allUsers.size,
+    });
+  });
+
+  if (task.cancelled) {
+    return finalizeCancelledTask(task, {
+      totalUsers: allUsers.size,
+    });
+  }
+
+  updateStatsTask(task, {
+    status: "completed",
+    progress: 100,
+    currentAction: task.accessDenied
+      ? "访问受限"
+      : task.failedCount > 0
+        ? `统计完成，跳过 ${task.failedCount} 个分集`
+        : "统计完成",
+    totalUsers: allUsers.size,
+    result: {
+      idResults: Array.from(dramaMap.values()).map((drama) => ({
+        title: drama.title,
+        selectedEpisodeCount: drama.selectedEpisodeCount,
+        danmaku: drama.danmaku,
+        users: drama.userSet.size,
+      })),
+      totalDanmaku: task.totalDanmaku,
+      totalUsers: allUsers.size,
+      idSelectedEpisodeCount: task.totalCount,
+    },
+  });
+}
+
+async function executeManboIdTask(task) {
+  const episodes = Array.isArray(task.episodes) ? task.episodes : [];
+  const dramaMap = buildIdDramaMap(episodes);
+  const allUsers = new Set();
+
+  updateStatsTask(task, {
+    status: "running",
+    currentAction: "开始统计弹幕与去重 ID",
+    progress: 0,
+    totalDanmaku: 0,
+    totalUsers: 0,
+  });
+
+  await runWithConcurrency(
+    episodes,
+    MANBO_STATS_EPISODE_CONCURRENCY,
+    async (episode) => {
+      if (task.cancelled) {
         return;
       }
-
       const setId = String(episode?.sound_id ?? "").trim();
       const dramaTitle = String(episode?.drama_title ?? "").trim() || "Unknown";
-
       try {
         const result = await fetchManboDanmakuSummary(setId, dramaTitle);
-
         if (result.success) {
           const drama = dramaMap.get(dramaTitle);
           if (drama) {
@@ -1583,7 +1930,6 @@ async function executeManboStatsTask(task) {
               allUsers.add(uid);
             });
           }
-
           task.totalDanmaku += Number(result.danmaku ?? 0);
         } else {
           task.failedCount += 1;
@@ -1597,29 +1943,33 @@ async function executeManboStatsTask(task) {
           task.accessDenied = true;
         }
       }
-
       task.completedCount += 1;
-      updateManboTask(task, {
-        progress:
-          task.totalCount > 0
-            ? Math.floor((task.completedCount / task.totalCount) * 100)
-            : 100,
-        currentAction: `统计 ID ${task.completedCount}/${task.totalCount}`, 
+      updateStatsTask(task, {
+        progress: task.totalCount > 0
+          ? Math.floor((task.completedCount / task.totalCount) * 100)
+          : 100,
+        currentAction: `统计 ID ${task.completedCount}/${task.totalCount}`,
         totalUsers: allUsers.size,
       });
-    });
-
-    if (task.cancelled) {
-      updateManboTask(task, {
-        status: "cancelled",
-        currentAction: hasManboTaskHeartbeatExpired(task)
-          ? "统计已超时取消"
-          : "统计已取消",
-      });
-      return;
     }
+  );
 
-    const result = {
+  if (task.cancelled) {
+    return finalizeCancelledTask(task, {
+      totalUsers: allUsers.size,
+    });
+  }
+
+  updateStatsTask(task, {
+    status: "completed",
+    progress: 100,
+    currentAction: task.accessDenied
+      ? "访问受限"
+      : task.failedCount > 0
+        ? `统计完成，跳过 ${task.failedCount} 个分集`
+        : "统计完成",
+    totalUsers: allUsers.size,
+    result: {
       idResults: Array.from(dramaMap.values()).map((drama) => ({
         title: drama.title,
         selectedEpisodeCount: drama.selectedEpisodeCount,
@@ -1629,26 +1979,514 @@ async function executeManboStatsTask(task) {
       totalDanmaku: task.totalDanmaku,
       totalUsers: allUsers.size,
       idSelectedEpisodeCount: task.totalCount,
-    };
+    },
+  });
+}
 
-    updateManboTask(task, {
-      status: "completed",
-      progress: 100,
-      currentAction: task.accessDenied
-        ? "访问受限"
-        : task.failedCount > 0
-          ? `统计完成，跳过 ${task.failedCount} 个分集`
-          : "统计完成",
-      totalUsers: allUsers.size,
-      result,
+async function executeMissevanPlayCountTask(task) {
+  const episodes = Array.isArray(task.episodes) ? task.episodes : [];
+  const dramaMap = buildPlayCountDramaMap(episodes);
+
+  updateStatsTask(task, {
+    status: "running",
+    currentAction: "开始统计播放量",
+    progress: 0,
+  });
+
+  for (const episode of episodes) {
+    if (task.cancelled) {
+      break;
+    }
+    const soundId = Number(episode?.sound_id ?? 0);
+    const dramaTitle = String(episode?.drama_title ?? "").trim() || "Unknown";
+    try {
+      const summary = await fetchSoundSummary(soundId);
+      const drama = dramaMap.get(dramaTitle);
+      if (drama) {
+        if (!summary || summary.playCountFailed) {
+          drama.playCountFailed = true;
+          if (summary?.accessDenied) {
+            task.accessDenied = true;
+          }
+        } else {
+          drama.playCountTotal += Number(summary.view_count ?? 0);
+        }
+      }
+    } catch (error) {
+      const drama = dramaMap.get(dramaTitle);
+      if (drama) {
+        drama.playCountFailed = true;
+      }
+      if (isAccessDeniedError(error)) {
+        task.accessDenied = true;
+      }
+      task.failedCount += 1;
+    }
+    task.completedCount += 1;
+    updateStatsTask(task, {
+      progress: task.totalCount > 0
+        ? Math.floor((task.completedCount / task.totalCount) * 100)
+        : 100,
+      currentAction: `统计播放量 ${task.completedCount}/${task.totalCount}`,
+    });
+  }
+
+  if (task.cancelled) {
+    return finalizeCancelledTask(task);
+  }
+
+  const playCountResults = Array.from(dramaMap.values()).map((drama) => ({
+    title: drama.title,
+    selectedEpisodeCount: drama.selectedEpisodeCount,
+    playCountTotal: drama.playCountTotal,
+    playCountFailed: drama.playCountFailed,
+  }));
+  const playCountTotal = playCountResults.reduce((sum, episode) => {
+    return episode.playCountFailed ? sum : sum + Number(episode.playCountTotal ?? 0);
+  }, 0);
+  const playCountFailed = playCountResults.some((item) => item.playCountFailed);
+
+  updateStatsTask(task, {
+    status: "completed",
+    progress: 100,
+    currentAction: task.accessDenied
+      ? "访问受限"
+      : "播放量统计完成",
+    result: {
+      playCountResults,
+      playCountSelectedEpisodeCount: task.totalCount,
+      playCountTotal,
+      playCountFailed,
+    },
+  });
+}
+
+async function executeUnsupportedPlayCountTask(task) {
+  updateStatsTask(task, {
+    status: "completed",
+    progress: 100,
+    currentAction: "Manbo 暂不支持播放量统计",
+    failedCount: task.totalCount,
+    result: {
+      playCountResults: [],
+      playCountSelectedEpisodeCount: task.totalCount,
+      playCountTotal: 0,
+      playCountFailed: true,
+    },
+  });
+}
+
+async function executeMissevanRevenueTask(task) {
+  const dramaIds = Array.isArray(task.dramaIds) ? task.dramaIds : [];
+  const results = [];
+
+  updateStatsTask(task, {
+    status: "running",
+    currentAction: "开始最低收益预估",
+    progress: 0,
+  });
+
+  for (const dramaIdValue of dramaIds) {
+    if (task.cancelled) {
+      break;
+    }
+    const dramaId = Number(dramaIdValue);
+    let title = `Drama ${dramaId}`;
+    try {
+      const dramaInfo = await fetchDramaInfo(dramaId);
+      title = dramaInfo?.drama?.name || title;
+      const viewCount = Number(dramaInfo?.drama?.view_count ?? 0);
+      const price = Number(dramaInfo?.drama?.price ?? 0);
+      const memberPrice = Number(dramaInfo?.drama?.member_price ?? 0);
+      const rewardMeta = await fetchRewardDetailMeta(dramaId).catch(() => null);
+      const rewardNum = normalizeOptionalFiniteNumber(rewardMeta?.reward_num);
+      const isMember = Boolean(dramaInfo?.drama?.is_member) || Number(dramaInfo?.drama?.vip ?? 0) === 1;
+      const vipOnlyReward = isMember;
+      const paidEpisodes = dramaInfo?.episodes?.episode?.filter((episode) => {
+        return Number(episode.need_pay ?? 0) === 1 || Number(episode.price ?? 0) > 0;
+      }) || [];
+
+      const userSet = new Set();
+      let failed = false;
+      let accessDenied = false;
+      let rewardCoinTotal = 0;
+
+      for (const episode of paidEpisodes) {
+        if (task.cancelled) {
+          break;
+        }
+        const danmakuResult = await fetchDanmakuSummary(episode.sound_id, title);
+        if (!danmakuResult.success) {
+          failed = true;
+          accessDenied = accessDenied || Boolean(danmakuResult.accessDenied);
+          break;
+        }
+        (Array.isArray(danmakuResult.users) ? danmakuResult.users : []).forEach((uid) => {
+          userSet.add(uid);
+        });
+      }
+
+      if (!failed && !task.cancelled) {
+        const rewardSummary = await fetchRewardSummary(dramaId);
+        if (!rewardSummary?.success) {
+          failed = true;
+          accessDenied = accessDenied || Boolean(rewardSummary?.accessDenied);
+        } else {
+          rewardCoinTotal = Number(rewardSummary.rewardCoinTotal ?? 0);
+        }
+      }
+
+      results.push({
+        dramaId,
+        platform: "missevan",
+        title,
+        subtitle: isMember
+          ? `${title} / ${price}（会员${memberPrice}）钻石`
+          : `${title} / ${price} 钻石`,
+        viewCount,
+        price,
+        memberPrice,
+        titlePrice: price > 0 ? price : null,
+        titleMemberPrice: memberPrice > 0 ? memberPrice : null,
+        includeInSummaryPrice: price > 0,
+        currencyUnit: "钻石",
+        summaryRevenueMode: vipOnlyReward ? "member_reward" : "single",
+        paidUserIds: Array.from(userSet),
+        paidUserCount: userSet.size,
+        rewardCoinTotal,
+        rewardNum,
+        vipOnlyReward,
+        estimatedRevenueYuan: vipOnlyReward
+          ? rewardCoinTotal / 10
+          : (userSet.size * price + rewardCoinTotal) / 10,
+        failed,
+        accessDenied,
+      });
+      task.accessDenied = task.accessDenied || accessDenied;
+      if (failed) {
+        task.failedCount += 1;
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const accessDenied =
+        isAccessDeniedError(error) ||
+        String(message).startsWith("ACCESS_DENIED_COOLDOWN:");
+      task.accessDenied = task.accessDenied || accessDenied;
+      task.failedCount += 1;
+      results.push({
+        dramaId,
+        platform: "missevan",
+        title,
+        subtitle: `${title} / 统计失败`,
+        viewCount: 0,
+        price: 0,
+        memberPrice: 0,
+        titlePrice: null,
+        titleMemberPrice: null,
+        includeInSummaryPrice: false,
+        currencyUnit: "钻石",
+        summaryRevenueMode: "single",
+        paidUserIds: [],
+        paidUserCount: 0,
+        rewardCoinTotal: 0,
+        rewardNum: null,
+        vipOnlyReward: false,
+        estimatedRevenueYuan: 0,
+        failed: true,
+        accessDenied,
+      });
+    }
+
+    task.completedCount += 1;
+    updateStatsTask(task, {
+      progress: task.totalCount > 0
+        ? Math.floor((task.completedCount / task.totalCount) * 100)
+        : 100,
+      currentAction: `正在统计收益 ${task.completedCount}/${task.totalCount} 部`,
+    });
+  }
+
+  if (task.cancelled) {
+    return finalizeCancelledTask(task, {
+      result: {
+        revenueResults: results,
+        revenueSummary: createRevenueSummary(results),
+      },
+    });
+  }
+
+  updateStatsTask(task, {
+    status: "completed",
+    progress: 100,
+    currentAction: results.some((item) => item.failed)
+      ? "收益预估完成，部分失败"
+      : "收益预估完成",
+    result: {
+      revenueResults: results,
+      revenueSummary: createRevenueSummary(results),
+    },
+  });
+}
+
+async function executeManboRevenueTask(task) {
+  const dramaIds = Array.isArray(task.dramaIds) ? task.dramaIds : [];
+  const results = [];
+
+  updateStatsTask(task, {
+    status: "running",
+    currentAction: "开始最低收益预估",
+    progress: 0,
+  });
+
+  for (const dramaIdValue of dramaIds) {
+    if (task.cancelled) {
+      break;
+    }
+    const dramaId = String(dramaIdValue);
+    let title = `Drama ${dramaId}`;
+    try {
+      const dramaInfo = await fetchManboDramaDetail(dramaId);
+      title = dramaInfo?.drama?.name || title;
+      const viewCount = Number(dramaInfo?.drama?.view_count ?? 0);
+      const diamondValue = Number(dramaInfo?.drama?.diamond_value ?? 0);
+      const revenueType = getManboRevenueType(dramaInfo);
+      const revenueEpisodes = getManboRevenueEpisodes(dramaInfo, revenueType);
+      const subtitle = getManboRevenueSubtitle(title, dramaInfo, revenueType, revenueEpisodes);
+
+      if (revenueType === "unknown" || revenueEpisodes.length === 0) {
+        results.push({
+          dramaId,
+          platform: "manbo",
+          revenueType,
+          title,
+          subtitle,
+          viewCount,
+          diamondValue,
+          titlePrice: null,
+          titleMemberPrice: null,
+          includeInSummaryPrice: false,
+          currencyUnit: "红豆",
+          summaryRevenueMode: "single",
+          paidUserIds: [],
+          paidUserCount: 0,
+          estimatedRevenueYuan: 0,
+          failed: true,
+          accessDenied: false,
+        });
+      } else {
+        const episodeUsers = [];
+        let failed = false;
+        let accessDenied = false;
+        for (const episode of revenueEpisodes) {
+          if (task.cancelled) {
+            break;
+          }
+          const danmakuResult = await fetchManboDanmakuSummary(episode.sound_id, title);
+          if (!danmakuResult.success) {
+            failed = true;
+            accessDenied = accessDenied || Boolean(danmakuResult.accessDenied);
+            break;
+          }
+          episodeUsers.push({
+            episode,
+            users: Array.isArray(danmakuResult.users) ? danmakuResult.users : [],
+          });
+        }
+
+        if (failed) {
+          task.failedCount += 1;
+        }
+        task.accessDenied = task.accessDenied || accessDenied;
+        const paidUserIds = Array.from(new Set(
+          episodeUsers.flatMap((item) => item.users.map((uid) => String(uid)))
+        ));
+        const paidUserCount = paidUserIds.length;
+
+        if (revenueType === "member") {
+          results.push({
+            dramaId,
+            platform: "manbo",
+            revenueType,
+            title,
+            subtitle,
+            viewCount,
+            diamondValue,
+            titlePrice: null,
+            titleMemberPrice: null,
+            includeInSummaryPrice: false,
+            currencyUnit: "红豆",
+            summaryRevenueMode: "member_reward",
+            paidUserIds,
+            paidUserCount,
+            estimatedRevenueYuan: diamondValue / 100,
+            failed,
+            accessDenied,
+          });
+        } else if (revenueType === "season") {
+          const drama = dramaInfo?.drama || {};
+          results.push({
+            dramaId,
+            platform: "manbo",
+            revenueType,
+            title,
+            subtitle,
+            viewCount,
+            diamondValue,
+            titlePrice: Number(drama.price ?? 0),
+            titleMemberPrice: Number(drama.member_price ?? 0) > 0
+              ? Number(drama.member_price ?? 0)
+              : null,
+            includeInSummaryPrice: true,
+            currencyUnit: "红豆",
+            summaryRevenueMode: "range",
+            paidUserIds,
+            paidUserCount,
+            minRevenueYuan: (paidUserCount * Number(drama.member_price ?? 0) + diamondValue) / 100,
+            maxRevenueYuan: (paidUserCount * Number(drama.price ?? 0) + diamondValue) / 100,
+            estimatedRevenueYuan: (paidUserCount * Number(drama.member_price ?? 0) + diamondValue) / 100,
+            failed,
+            accessDenied,
+          });
+        } else {
+          const paidEpisodeCount = episodeUsers.length;
+          const episodePrices = [
+            ...new Set(
+              episodeUsers
+                .map((item) => Number(item?.episode?.price ?? 0))
+                .filter((price) => price > 0)
+            ),
+          ];
+          const episodeRevenue = episodeUsers.reduce((sum, item) => {
+            return sum + item.users.length * Number(item?.episode?.price ?? 0);
+          }, 0);
+          const minRevenueYuan = (episodeRevenue + diamondValue) / 100;
+          const hasUniformEpisodePrice = episodePrices.length === 1;
+          const maxRevenueYuan = hasUniformEpisodePrice
+            ? (paidUserCount * episodePrices[0] * paidEpisodeCount + diamondValue) / 100
+            : null;
+          results.push({
+            dramaId,
+            platform: "manbo",
+            revenueType,
+            title,
+            subtitle,
+            viewCount,
+            diamondValue,
+            titlePrice: hasUniformEpisodePrice
+              ? Number(episodePrices[0] ?? 0) * paidEpisodeCount
+              : null,
+            titleMemberPrice: null,
+            includeInSummaryPrice: hasUniformEpisodePrice,
+            currencyUnit: "红豆",
+            summaryRevenueMode: hasUniformEpisodePrice ? "range" : "single",
+            paidUserIds,
+            paidUserCount,
+            estimatedRevenueYuan: minRevenueYuan,
+            minRevenueYuan,
+            maxRevenueYuan,
+            failed,
+            accessDenied,
+          });
+        }
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const accessDenied =
+        isAccessDeniedError(error) ||
+        String(message).startsWith("ACCESS_DENIED_COOLDOWN:");
+      task.accessDenied = task.accessDenied || accessDenied;
+      task.failedCount += 1;
+      results.push({
+        dramaId,
+        platform: "manbo",
+        title,
+        subtitle: `${title} / 统计失败`,
+        viewCount: 0,
+        diamondValue: 0,
+        titlePrice: null,
+        titleMemberPrice: null,
+        includeInSummaryPrice: false,
+        currencyUnit: "红豆",
+        summaryRevenueMode: "single",
+        paidUserIds: [],
+        paidUserCount: 0,
+        estimatedRevenueYuan: 0,
+        failed: true,
+        accessDenied,
+      });
+    }
+
+    task.completedCount += 1;
+    updateStatsTask(task, {
+      progress: task.totalCount > 0
+        ? Math.floor((task.completedCount / task.totalCount) * 100)
+        : 100,
+      currentAction: `正在统计收益 ${task.completedCount}/${task.totalCount} 部`,
+    });
+  }
+
+  if (task.cancelled) {
+    return finalizeCancelledTask(task, {
+      result: {
+        revenueResults: results,
+        revenueSummary: createRevenueSummary(results),
+      },
+    });
+  }
+
+  updateStatsTask(task, {
+    status: "completed",
+    progress: 100,
+    currentAction: results.some((item) => item.failed)
+      ? "收益预估完成，部分失败"
+      : "收益预估完成",
+    result: {
+      revenueResults: results,
+      revenueSummary: createRevenueSummary(results),
+    },
+  });
+}
+
+async function executeStatsTask(task) {
+  try {
+    if (task.taskType === "id") {
+      if (task.platform === "manbo") {
+        await executeManboIdTask(task);
+        return;
+      }
+      await executeMissevanIdTask(task);
+      return;
+    }
+
+    if (task.taskType === "play_count") {
+      if (task.platform === "manbo") {
+        await executeUnsupportedPlayCountTask(task);
+        return;
+      }
+      await executeMissevanPlayCountTask(task);
+      return;
+    }
+
+    if (task.taskType === "revenue") {
+      if (task.platform === "manbo") {
+        await executeManboRevenueTask(task);
+        return;
+      }
+      await executeMissevanRevenueTask(task);
+      return;
+    }
+
+    updateStatsTask(task, {
+      status: "failed",
+      currentAction: "统计失败",
+      error: `Unsupported task type: ${task.taskType}`,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    updateManboTask(task, {
+    updateStatsTask(task, {
       status: "failed",
       currentAction: "统计失败",
       error: message,
-      totalUsers: allUsers.size,
     });
   }
 }
@@ -2183,35 +3021,44 @@ app.post("/manbo/getsetdanmaku", async (req, res) => {
   return res.json(result);
 });
 
-app.post("/manbo/stat-tasks", async (req, res) => {
-  cleanupExpiredManboStatsTasks();
-
-  const episodes = (Array.isArray(req.body?.episodes) ? req.body.episodes : [])
+function normalizeTaskEpisodes(rawEpisodes = []) {
+  return (Array.isArray(rawEpisodes) ? rawEpisodes : [])
     .map((episode) => ({
       sound_id: String(episode?.sound_id ?? "").trim(),
       drama_title: String(episode?.drama_title ?? "").trim(),
     }))
     .filter((episode) => episode.sound_id);
+}
 
-  if (!episodes.length) {
-    return res.status(400).json({
-      error: "Missing episodes",
-    });
-  }
+function normalizeTaskDramaIds(rawDramaIds = [], platform = "missevan") {
+  const values = Array.isArray(rawDramaIds) ? rawDramaIds : [];
+  return Array.from(
+    new Set(
+      values
+        .map((value) => String(value ?? "").trim())
+        .filter((value) => /^\d+$/.test(value))
+        .map((value) => (platform === "manbo" ? value : Number(value)))
+    )
+  );
+}
 
+function createStatsTask({ platform, taskType, episodes = [], dramaIds = [] }) {
   const taskId = createTaskId();
   const task = {
     taskId,
+    platform,
+    taskType,
     status: "queued",
     progress: 0,
     currentAction: "任务已创建",
-    totalCount: episodes.length,
+    totalCount: taskType === "revenue" ? dramaIds.length : episodes.length,
     completedCount: 0,
     failedCount: 0,
     totalDanmaku: 0,
     totalUsers: 0,
     accessDenied: false,
     episodes,
+    dramaIds,
     result: null,
     error: "",
     cancelled: false,
@@ -2221,48 +3068,109 @@ app.post("/manbo/stat-tasks", async (req, res) => {
   };
 
   manboStatsTaskStore.set(taskId, task);
-  executeManboStatsTask(task).catch((error) => {
-    const message = error instanceof Error ? error.message : String(error);
-    updateManboTask(task, {
-      status: "failed",
-      currentAction: "统计失败",
-      error: message,
-    });
+  executeStatsTask(task);
+  return task;
+}
+
+function getStatsTaskOr404(taskId, res) {
+  cleanupExpiredStatsTasks();
+  const task = manboStatsTaskStore.get(String(taskId));
+  if (!task) {
+    res.status(404).json({ error: "Task not found" });
+    return null;
+  }
+  return task;
+}
+
+function createStatsTaskFromRequest(req, res, forcedPlatform = null, defaultTaskType = null) {
+  const platform =
+    forcedPlatform || (req.body?.platform === "manbo" ? "manbo" : "missevan");
+  const taskType = String(req.body?.taskType ?? "").trim();
+  const normalizedTaskType = taskType || defaultTaskType || "";
+  const episodes = normalizeTaskEpisodes(req.body?.episodes);
+  const dramaIds = normalizeTaskDramaIds(req.body?.dramaIds, platform);
+
+  if (!["play_count", "id", "revenue"].includes(normalizedTaskType)) {
+    res.status(400).json({ error: "Invalid taskType" });
+    return null;
+  }
+
+  if (normalizedTaskType === "revenue" && !dramaIds.length) {
+    res.status(400).json({ error: "Missing dramaIds" });
+    return null;
+  }
+
+  if (normalizedTaskType !== "revenue" && !episodes.length) {
+    res.status(400).json({ error: "Missing episodes" });
+    return null;
+  }
+
+  return createStatsTask({
+    platform,
+    taskType: normalizedTaskType,
+    episodes,
+    dramaIds,
   });
+}
 
-  return res.json(buildManboTaskSnapshot(task));
+app.post("/stat-tasks", async (req, res) => {
+  const task = createStatsTaskFromRequest(req, res);
+  if (!task) {
+    return;
+  }
+  return res.json(buildStatsTaskSnapshot(task));
 });
 
-app.get("/manbo/stat-tasks/:taskId", async (req, res) => {
-  cleanupExpiredManboStatsTasks();
-  const task = manboStatsTaskStore.get(String(req.params.taskId));
-
+app.get("/stat-tasks/:taskId", async (req, res) => {
+  const task = getStatsTaskOr404(req.params.taskId, res);
   if (!task) {
-    return res.status(404).json({
-      error: "Task not found",
-    });
+    return;
   }
-
-  refreshManboTaskHeartbeat(task);
-  return res.json(buildManboTaskSnapshot(task));
+  refreshStatsTaskHeartbeat(task);
+  return res.json(buildStatsTaskSnapshot(task));
 });
 
-app.post("/manbo/stat-tasks/:taskId/cancel", async (req, res) => {
-  const task = manboStatsTaskStore.get(String(req.params.taskId));
-
+app.post("/stat-tasks/:taskId/cancel", async (req, res) => {
+  const task = getStatsTaskOr404(req.params.taskId, res);
   if (!task) {
-    return res.status(404).json({
-      error: "Task not found",
-    });
+    return;
   }
-
   task.cancelled = true;
-  updateManboTask(task, {
+  updateStatsTask(task, {
     status: task.status === "completed" ? "completed" : "cancelled",
     currentAction: task.status === "completed" ? task.currentAction : "统计已取消",
   });
+  return res.json(buildStatsTaskSnapshot(task));
+});
 
-  return res.json(buildManboTaskSnapshot(task));
+app.post("/manbo/stat-tasks", async (req, res) => {
+  const task = createStatsTaskFromRequest(req, res, "manbo", "id");
+  if (!task) {
+    return;
+  }
+  return res.json(buildStatsTaskSnapshot(task));
+});
+
+app.get("/manbo/stat-tasks/:taskId", async (req, res) => {
+  const task = getStatsTaskOr404(req.params.taskId, res);
+  if (!task) {
+    return;
+  }
+  refreshStatsTaskHeartbeat(task);
+  return res.json(buildStatsTaskSnapshot(task));
+});
+
+app.post("/manbo/stat-tasks/:taskId/cancel", async (req, res) => {
+  const task = getStatsTaskOr404(req.params.taskId, res);
+  if (!task) {
+    return;
+  }
+  task.cancelled = true;
+  updateStatsTask(task, {
+    status: task.status === "completed" ? "completed" : "cancelled",
+    currentAction: task.status === "completed" ? task.currentAction : "统计已取消",
+  });
+  return res.json(buildStatsTaskSnapshot(task));
 });
 
 app.use(express.static(path.join(__dirname, "dist")));
