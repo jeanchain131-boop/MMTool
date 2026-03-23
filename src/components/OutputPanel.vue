@@ -9,6 +9,14 @@
         </div>
         <div class="status-side">
           <div v-if="isRunning" class="status-badge">进行中</div>
+          <button
+            v-if="isRunning"
+            type="button"
+            class="status-cancel-btn"
+            @click="$emit('cancelStatistics')"
+          >
+            取消
+          </button>
           <div class="status-progress">{{ progress }}%</div>
         </div>
       </div>
@@ -190,6 +198,7 @@
 
 <script>
 export default {
+  emits: ["cancelStatistics"],
   props: {
     progress: Number,
     currentAction: String,
@@ -348,6 +357,10 @@ export default {
 }
 
 .status-side {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
   text-align: right;
 }
 
@@ -361,8 +374,23 @@ export default {
   border-radius: 999px;
 }
 
+.status-cancel-btn {
+  min-height: 34px;
+  padding: 6px 14px;
+  color: #8a2d18;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  background: rgba(255, 241, 235, 0.9);
+  border: 1px solid rgba(207, 92, 54, 0.2);
+  border-radius: 999px;
+}
+
+.status-cancel-btn:hover {
+  background: rgba(255, 233, 224, 0.96);
+}
+
 .status-progress {
-  margin-top: 8px;
   font-size: 20px;
   font-weight: 800;
 }
@@ -444,7 +472,23 @@ export default {
   }
 
   .status-side {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
     text-align: left;
+  }
+
+  .status-badge {
+    justify-self: start;
+  }
+
+  .status-cancel-btn {
+    justify-self: end;
+  }
+
+  .status-progress {
+    grid-column: 1 / -1;
+    justify-self: start;
   }
 }
 </style>
