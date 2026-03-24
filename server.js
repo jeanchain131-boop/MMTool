@@ -6,9 +6,15 @@ import https from "https";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createManboIndexStore, normalizeManboIndexName } from "./manboIndexStore.js";
+import { loadLocalEnv } from "./envConfig.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+await loadLocalEnv({
+  desktopApp: process.env.DESKTOP_APP === "true",
+  projectRoot: __dirname,
+  appDataDir: process.env.APP_DATA_DIR || "",
+});
 
 const app = express();
 const defaultPort = Number(process.env.PORT) || 3000;

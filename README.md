@@ -37,6 +37,26 @@ Windows 桌面版会直接在界面中提示这一步。
 
 未配置 Upstash 时，Manbo 轻量索引库会回退到运行目录下的 `runtime/manbo-index.json`。
 
+## 本地 `.env`
+
+本地开发版支持在项目根目录放置 `.env`，这样可以直接运行 `npm start` 或 `npm run desktop`，不用每次手动设置环境变量。
+
+示例：
+
+```env
+UPSTASH_REDIS_REST_URL=https://your-upstash-endpoint.upstash.io
+UPSTASH_REDIS_REST_TOKEN=your-upstash-token
+MANBO_INDEX_SYNC_INTERVAL_MS=30000
+```
+
+Windows 桌面版支持以下优先顺序：
+
+1. `exe` 同目录下的 `.env`
+2. `APP_DATA_DIR/.env`
+3. 系统已有环境变量
+
+如果都没有配置 Upstash，桌面版会继续回退到本地 runtime 索引文件，再回退到内置的 `data/manbo-index.seed.json`。
+
 ## Render 部署
 
 项目已包含 `render.yaml`，默认配置为：
@@ -94,3 +114,4 @@ npm run pack:win
 - 桌面版会在本机内嵌启动 Express 服务
 - `Missevan` 请求从用户自己的电脑发出，通常比云环境更稳定
 - 图标文件为 `windowsapp.ico`
+- 打包后的桌面版会内置 `data/manbo-index.seed.json` 作为默认 Manbo 起始库

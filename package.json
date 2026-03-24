@@ -40,6 +40,9 @@
       "dist/**/*",
       "electron/**/*",
       "server.js",
+      "manboIndexStore.js",
+      "envConfig.js",
+      "data/**/*",
       "package.json"
     ],
     "win": {

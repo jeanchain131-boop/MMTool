@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import path from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { promises as fs } from "fs";
+import { loadLocalEnv } from "../envConfig.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -136,6 +137,12 @@ async function startEmbeddedServer() {
   process.env.START_SERVER_ON_IMPORT = "false";
   process.env.APP_DATA_DIR = app.getPath("userData");
   process.env.DESKTOP_APP = "true";
+  await loadLocalEnv({
+    desktopApp: true,
+    projectRoot,
+    appDataDir: process.env.APP_DATA_DIR,
+    exeDir: path.dirname(app.getPath("exe")),
+  });
 
   const serverModule = await import(pathToFileURL(path.join(projectRoot, "server.js")).href);
   const listener = await serverModule.startServer(0);
