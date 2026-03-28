@@ -5,7 +5,22 @@
         <p class="section-kicker">{{ platformTitle }}</p>
         <h2 class="section-title">{{ panelTitle }}</h2>
       </div>
-      <p class="section-tip">{{ panelTip }}</p>
+      <p class="section-tip">
+        <template v-if="platform === 'missevan' && !isDesktopApp">
+          如果搜索接口暂时受限，请 {{ cooldownText }} 小时后再来。
+          <template v-if="desktopAppUrl">
+            或<a
+              class="section-tip-link"
+              :href="desktopAppUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+            >点这里</a>使用桌面版。
+          </template>
+        </template>
+        <template v-else>
+          {{ panelTip }}
+        </template>
+      </p>
     </div>
 
     <div v-if="platform === 'missevan'" class="search-card">
@@ -85,6 +100,10 @@ export default {
       type: Number,
       default: 0,
     },
+    desktopAppUrl: {
+      type: String,
+      default: "",
+    },
   },
   data() {
     return {
@@ -108,6 +127,9 @@ export default {
       }
 
       return this.getMissevanAccessLimitedText();
+    },
+    cooldownText() {
+      return this.getRemainingCooldownHours();
     },
     manualLabel() {
       return this.platform === "manbo"
@@ -380,6 +402,16 @@ export default {
   color: var(--text-muted);
   font-size: 13px;
   line-height: 1.6;
+}
+
+.section-tip-link {
+  color: var(--accent);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.section-tip-link:hover {
+  text-decoration: underline;
 }
 
 .search-card {

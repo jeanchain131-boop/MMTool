@@ -25,6 +25,7 @@
           :isDesktopApp="appConfig.desktopApp"
           :cooldownHours="appConfig.cooldownHours"
           :cooldownUntil="appConfig.cooldownUntil"
+          :desktopAppUrl="appConfig.desktopAppUrl"
           @resetState="resetSearchFlow"
           @updateResults="setSearchResults"
         />
@@ -129,6 +130,7 @@ function getDefaultAppConfig() {
     description: "支持 Missevan 与 Manbo 的作品导入、分集筛选、弹幕统计和数据汇总。",
     cooldownHours: 4,
     cooldownUntil: 0,
+    desktopAppUrl: "",
   };
 }
 
@@ -228,6 +230,7 @@ export default {
         description: config.description || defaults.description,
         cooldownHours: Number(config.cooldownHours ?? defaults.cooldownHours) || defaults.cooldownHours,
         cooldownUntil: Number(config.cooldownUntil ?? 0) || 0,
+        desktopAppUrl: String(config.desktopAppUrl || "").trim(),
       };
       if (!this.appConfig.missevanEnabled && this.currentPlatform === "missevan") {
         this.currentPlatform = "manbo";

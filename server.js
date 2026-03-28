@@ -30,7 +30,13 @@ const MISSEVAN_COOLDOWN_HOURS = Math.max(
   1,
   Number(process.env.MISSEVAN_COOLDOWN_HOURS ?? 4) || 4
 );
+const MISSEVAN_REPEAT_COOLDOWN_HOURS = 1;
+const MISSEVAN_DESKTOP_APP_URL = String(
+  process.env.MISSEVAN_DESKTOP_APP_URL || ""
+).trim();
 const MISSEVAN_COOLDOWN_MS = MISSEVAN_COOLDOWN_HOURS * 60 * 60 * 1000;
+const MISSEVAN_REPEAT_COOLDOWN_MS =
+  MISSEVAN_REPEAT_COOLDOWN_HOURS * 60 * 60 * 1000;
 const COOLDOWN_STATE_PATH = path.join(runtimeDir, "missevan-cooldown.json");
 
 const MANBO_API_BASE = "https://www.kilamanbo.com/web_manbo";
@@ -78,6 +84,7 @@ const manboHttpsAgent = new https.Agent({
 });
 
 let accessDeniedUntil = 0;
+let accessDeniedUseShortCooldown = false;
 let cooldownStateLoaded = false;
 
 app.use(cors());
@@ -94,6 +101,7 @@ app.get("/app-config", (req, res) => {
       : "支持 Manbo 平台的作品导入、分集筛选、弹幕统计和去重 ID 汇总。",
     cooldownHours: MISSEVAN_COOLDOWN_HOURS,
     cooldownUntil: isInAccessDeniedCooldown() ? accessDeniedUntil : 0,
+    desktopAppUrl: MISSEVAN_DESKTOP_APP_URL,
   });
 });
 
@@ -200,7 +208,14 @@ async function persistAccessDeniedCooldown() {
     await fs.mkdir(runtimeDir, { recursive: true });
     await fs.writeFile(
       COOLDOWN_STATE_PATH,
-      JSON.stringify({ accessDeniedUntil }, null, 2),
+      JSON.stringify(
+        {
+          accessDeniedUntil,
+          accessDeniedUseShortCooldown,
+        },
+        null,
+        2
+      ),
       "utf8"
     );
   } catch (error) {
@@ -233,16 +248,18 @@ async function loadAccessDeniedCooldown() {
     const payload = JSON.parse(content);
     const until = Number(payload?.accessDeniedUntil ?? 0);
     accessDeniedUntil = Number.isFinite(until) ? until : 0;
+    accessDeniedUseShortCooldown = payload?.accessDeniedUseShortCooldown === true;
   } catch (error) {
     if (error?.code !== "ENOENT") {
       console.error("Failed to read Missevan cooldown state", error);
     }
     accessDeniedUntil = 0;
+    accessDeniedUseShortCooldown = false;
   }
 
   if (accessDeniedUntil <= Date.now()) {
     accessDeniedUntil = 0;
-    await clearPersistedAccessDeniedCooldown();
+    await persistAccessDeniedCooldown();
   }
 }
 
@@ -253,7 +270,7 @@ function isInAccessDeniedCooldown() {
 
   if (accessDeniedUntil > 0 && accessDeniedUntil <= Date.now()) {
     accessDeniedUntil = 0;
-    void clearPersistedAccessDeniedCooldown();
+    void persistAccessDeniedCooldown();
     return false;
   }
 
@@ -265,8 +282,27 @@ function markAccessDeniedCooldown() {
     return;
   }
 
-  accessDeniedUntil = Date.now() + MISSEVAN_COOLDOWN_MS;
+  accessDeniedUntil = Date.now() + (
+    accessDeniedUseShortCooldown
+      ? MISSEVAN_REPEAT_COOLDOWN_MS
+      : MISSEVAN_COOLDOWN_MS
+  );
+  accessDeniedUseShortCooldown = true;
   void persistAccessDeniedCooldown();
+}
+
+function markSuccessfulMissevanRequest() {
+  if (!shouldUsePersistentCooldown()) {
+    return;
+  }
+
+  if (accessDeniedUntil === 0 && accessDeniedUseShortCooldown === false) {
+    return;
+  }
+
+  accessDeniedUntil = 0;
+  accessDeniedUseShortCooldown = false;
+  void clearPersistedAccessDeniedCooldown();
 }
 
 function getCooldownRemainingMs() {
@@ -545,7 +581,11 @@ async function fetchJsonWithRetry(url, retries = 2, delayMs = 250, options = {})
         throw new Error(`HTTP ${response.status}`);
       }
 
-      return await response.json();
+      const data = await response.json();
+      if (options.missevan) {
+        markSuccessfulMissevanRequest();
+      }
+      return data;
     } catch (error) {
       if (options.missevan && isAccessDeniedError(error)) {
         markAccessDeniedCooldown();
@@ -586,7 +626,11 @@ async function fetchTextWithRetry(url, retries = 2, delayMs = 250, options = {})
         throw new Error(`HTTP ${response.status}`);
       }
 
-      return await response.text();
+      const text = await response.text();
+      if (options.missevan) {
+        markSuccessfulMissevanRequest();
+      }
+      return text;
     } catch (error) {
       if (options.missevan && isAccessDeniedError(error)) {
         markAccessDeniedCooldown();
