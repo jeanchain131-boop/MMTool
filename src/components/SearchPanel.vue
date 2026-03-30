@@ -34,7 +34,9 @@
           placeholder="输入作品名、作者名或关键词"
           @keyup.enter="search"
         />
-        <button class="primary-btn" @click="search">搜索</button>
+        <button class="primary-btn" type="button" :disabled="isSearchPending" @click="search">
+          {{ searchButtonText }}
+        </button>
       </div>
     </div>
 
@@ -49,7 +51,9 @@
           placeholder="输入剧名、别名或 Drama ID"
           @keyup.enter="search"
         />
-        <button class="primary-btn" @click="search">搜索</button>
+        <button class="primary-btn" type="button" :disabled="isSearchPending" @click="search">
+          {{ searchButtonText }}
+        </button>
       </div>
     </div>
 
@@ -64,7 +68,14 @@
           :placeholder="manualPlaceholder"
         ></textarea>
         <div class="search-actions">
-          <button class="primary-btn" @click="queryManualInput">{{ manualButtonText }}</button>
+          <button
+            class="primary-btn"
+            type="button"
+            :disabled="isManualPending"
+            @click="queryManualInput"
+          >
+            {{ pendingManualButtonText }}
+          </button>
           <button class="secondary-btn" type="button" @click="clearManualInput">
             清空
           </button>
@@ -110,6 +121,8 @@ export default {
       keyword: "",
       manboKeyword: "",
       manualInput: "",
+      isSearchPending: false,
+      isManualPending: false,
     };
   },
   computed: {
@@ -143,6 +156,16 @@ export default {
     },
     manualButtonText() {
       return this.platform === "manbo" ? "解析并导入" : "导入作品";
+    },
+    searchButtonText() {
+      return this.isSearchPending ? "搜索中" : "搜索";
+    },
+    pendingManualButtonText() {
+      if (!this.isManualPending) {
+        return this.manualButtonText;
+      }
+
+      return this.platform === "manbo" ? "解析中" : "导入中";
     },
   },
   methods: {
@@ -203,6 +226,10 @@ export default {
       );
     },
     async search() {
+      if (this.isSearchPending) {
+        return;
+      }
+
       if (this.platform === "manbo") {
         const keyword = this.manboKeyword.trim();
         if (!keyword) {
@@ -210,6 +237,7 @@ export default {
         }
 
         this.$emit("resetState");
+        this.isSearchPending = true;
 
         try {
           const response = await fetch(
@@ -228,19 +256,23 @@ export default {
         } catch (error) {
           console.error(error);
           alert("漫播索引搜索失败，请稍后重试");
+        } finally {
+          this.isSearchPending = false;
         }
         return;
       }
 
-      if (!this.keyword.trim()) {
+      const keyword = this.keyword.trim();
+      if (!keyword) {
         return;
       }
 
       this.$emit("resetState");
+      this.isSearchPending = true;
 
       try {
         const response = await fetch(
-          `/search?keyword=${encodeURIComponent(this.keyword)}`
+          `/search?keyword=${encodeURIComponent(keyword)}`
         );
         const data = await response.json();
 
@@ -259,11 +291,30 @@ export default {
       } catch (error) {
         console.error(error);
         alert("搜索失败，请稍后重试");
+      } finally {
+        this.isSearchPending = false;
       }
     },
     async queryManualInput() {
+      if (this.isManualPending) {
+        return;
+      }
+
       if (this.platform === "manbo") {
-        await this.queryManbo();
+        const rawItems = this.parseRawItems(this.manualInput);
+        if (!rawItems.length) {
+          alert("请至少输入一个有效的 Manbo ID 或链接");
+          return;
+        }
+
+        this.$emit("resetState");
+        this.isManualPending = true;
+
+        try {
+          await this.queryManbo(rawItems);
+        } finally {
+          this.isManualPending = false;
+        }
         return;
       }
 
@@ -274,6 +325,7 @@ export default {
       }
 
       this.$emit("resetState");
+      this.isManualPending = true;
 
       try {
         const response = await fetch("/getdramacards", {
@@ -302,17 +354,11 @@ export default {
       } catch (error) {
         console.error(error);
         alert("导入作品失败，请稍后重试");
+      } finally {
+        this.isManualPending = false;
       }
     },
-    async queryManbo() {
-      const rawItems = this.parseRawItems(this.manualInput);
-      if (!rawItems.length) {
-        alert("请至少输入一个有效的 Manbo ID 或链接");
-        return;
-      }
-
-      this.$emit("resetState");
-
+    async queryManbo(rawItems) {
       try {
         const items = await Promise.all(
           rawItems.map(async (raw) => {
@@ -474,6 +520,11 @@ export default {
   background: linear-gradient(135deg, var(--accent), var(--accent-strong));
   border: none;
   border-radius: 12px;
+}
+
+.primary-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .secondary-btn {

@@ -307,7 +307,7 @@ export default {
       this.rewardMetaCache.set(key, result);
       return result;
     },
-    async fetchDanmakuUsers(platform, episodeId, dramaTitle, signal) {
+    async fetchDanmakuUsers(platform, episodeId, dramaTitle, episodeTitle, signal) {
       const cache = this.danmakuCache[platform];
       const key = String(episodeId);
       if (cache.has(key)) {
@@ -316,7 +316,7 @@ export default {
 
       const result = await this.postJson(
         this.getDanmakuEndpoint(platform),
-        { sound_id: episodeId, drama_title: dramaTitle },
+        { sound_id: episodeId, drama_title: dramaTitle, episode_title: episodeTitle || "" },
         signal,
         "Failed to load danmaku"
       );
@@ -350,7 +350,13 @@ export default {
       const selectedEpisodes = this.getEpisodesForRow(platform, row.category, dramaInfo);
       const episodeUserEntries = [];
       for (const episode of selectedEpisodes) {
-        const users = await this.fetchDanmakuUsers(platform, episode.sound_id, drama.name, signal);
+        const users = await this.fetchDanmakuUsers(
+          platform,
+          episode.sound_id,
+          drama.name,
+          episode.name,
+          signal
+        );
         episodeUserEntries.push({
           episode,
           users,

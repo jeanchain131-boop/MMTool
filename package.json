@@ -42,6 +42,7 @@
       "server.js",
       "manboIndexStore.js",
       "envConfig.js",
+      "shared/**/*",
       "data/**/*",
       "package.json"
     ],

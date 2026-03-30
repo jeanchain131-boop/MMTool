@@ -7,6 +7,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { createManboIndexStore, normalizeManboIndexName } from "./manboIndexStore.js";
 import { loadLocalEnv } from "./envConfig.js";
+import { isMissevanLikelyDanmakuOverflow } from "./shared/episodeRules.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -702,12 +703,14 @@ async function fetchSoundSummary(soundId) {
   );
   const sound = data?.info?.sound || data?.info || {};
   const viewCount = Number(sound.view_count ?? 0);
+  const duration = Number(sound.duration ?? 0);
 
   const summary = {
     sound_id: Number(soundId),
     success: true,
     view_count: viewCount,
     viewCountWan: sound.view_count_formatted || formatPlayCountWan(viewCount),
+    duration,
     playCountFailed: false,
     accessDenied: false,
     error: "",
@@ -861,7 +864,7 @@ function normalizeOptionalFiniteNumber(value) {
   return Number.isFinite(normalized) ? normalized : null;
 }
 
-async function fetchDanmakuSummary(soundId, dramaTitle) {
+async function fetchDanmakuSummary(soundId, dramaTitle, episodeTitle = "") {
   const cacheKey = String(soundId);
   const cached = getCachedValue(danmakuCache, cacheKey, SOUND_SUMMARY_CACHE_TTL_MS);
   if (cached) {
@@ -870,6 +873,7 @@ async function fetchDanmakuSummary(soundId, dramaTitle) {
       action: "danmaku_summary",
       soundId: Number(soundId),
       dramaTitle,
+      episodeTitle,
       success: Boolean(cached.success),
       danmaku: Number(cached.danmaku ?? 0),
       userCount: Array.isArray(cached.users) ? cached.users.length : 0,
@@ -880,6 +884,7 @@ async function fetchDanmakuSummary(soundId, dramaTitle) {
     return {
       ...cached,
       drama_title: dramaTitle,
+      episode_title: episodeTitle,
     };
   }
 
@@ -918,6 +923,7 @@ async function fetchDanmakuSummary(soundId, dramaTitle) {
       action: "danmaku_summary",
       soundId: Number(soundId),
       dramaTitle,
+      episodeTitle,
       success: true,
       danmaku: lines.length,
       userCount: users.size,
@@ -929,6 +935,7 @@ async function fetchDanmakuSummary(soundId, dramaTitle) {
     return {
       ...cachedResult,
       drama_title: dramaTitle,
+      episode_title: episodeTitle,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -941,6 +948,7 @@ async function fetchDanmakuSummary(soundId, dramaTitle) {
       action: "danmaku_summary",
       soundId: Number(soundId),
       dramaTitle,
+      episodeTitle,
       success: false,
       danmaku: 0,
       userCount: 0,
@@ -953,6 +961,7 @@ async function fetchDanmakuSummary(soundId, dramaTitle) {
       success: false,
       sound_id: Number(soundId),
       drama_title: dramaTitle,
+      episode_title: episodeTitle,
       danmaku: 0,
       users: [],
       accessDenied,
@@ -1560,7 +1569,7 @@ async function fetchManboSetSummary(setId) {
   };
 }
 
-async function fetchManboDanmakuSummary(setId, dramaTitle) {
+async function fetchManboDanmakuSummary(setId, dramaTitle, episodeTitle = "") {
   const cached = getCachedValue(
     manboDanmakuCache,
     setId,
@@ -1572,6 +1581,7 @@ async function fetchManboDanmakuSummary(setId, dramaTitle) {
       action: "danmaku_summary",
       soundId: String(setId),
       dramaTitle,
+      episodeTitle,
       success: Boolean(cached.success),
       danmaku: Number(cached.danmaku ?? 0),
       userCount: Array.isArray(cached.users) ? cached.users.length : 0,
@@ -1582,6 +1592,7 @@ async function fetchManboDanmakuSummary(setId, dramaTitle) {
     return {
       ...cached,
       drama_title: dramaTitle,
+      episode_title: episodeTitle,
     };
   }
 
@@ -1591,6 +1602,7 @@ async function fetchManboDanmakuSummary(setId, dramaTitle) {
     return {
       ...result,
       drama_title: dramaTitle,
+      episode_title: episodeTitle,
     };
   }
 
@@ -1664,6 +1676,7 @@ async function fetchManboDanmakuSummary(setId, dramaTitle) {
         action: "danmaku_summary",
         soundId: String(setId),
         dramaTitle,
+        episodeTitle,
         success: true,
         danmaku: totalDanmaku,
         userCount: users.size,
@@ -1678,6 +1691,7 @@ async function fetchManboDanmakuSummary(setId, dramaTitle) {
       return {
         ...summary,
         drama_title: dramaTitle,
+        episode_title: episodeTitle,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1690,6 +1704,7 @@ async function fetchManboDanmakuSummary(setId, dramaTitle) {
         action: "danmaku_summary",
         soundId: String(setId),
         dramaTitle,
+        episodeTitle,
         success: false,
         danmaku: 0,
         userCount: 0,
@@ -1704,6 +1719,7 @@ async function fetchManboDanmakuSummary(setId, dramaTitle) {
         success: false,
         sound_id: String(setId),
         drama_title: dramaTitle,
+        episode_title: episodeTitle,
         danmaku: 0,
         users: [],
         accessDenied,
@@ -1752,6 +1768,14 @@ function buildIdDramaMap(episodes) {
     dramaMap.get(title).selectedEpisodeCount += 1;
   });
   return dramaMap;
+}
+
+function buildOverflowDisplayTitle(dramaTitle, episodeTitle) {
+  const normalizedDramaTitle = String(dramaTitle ?? "").trim() || "Unknown";
+  const normalizedEpisodeTitle = String(episodeTitle ?? "").trim();
+  return normalizedEpisodeTitle
+    ? `${normalizedDramaTitle} / ${normalizedEpisodeTitle}`
+    : normalizedDramaTitle;
 }
 
 function buildPlayCountDramaMap(episodes) {
@@ -1995,6 +2019,7 @@ async function executeMissevanIdTask(task) {
   const episodes = Array.isArray(task.episodes) ? task.episodes : [];
   const dramaMap = buildIdDramaMap(episodes);
   const allUsers = new Set();
+  const suspectedOverflowMainEpisodes = new Set();
 
   updateStatsTask(task, {
     status: "running",
@@ -2010,8 +2035,9 @@ async function executeMissevanIdTask(task) {
     }
     const soundId = Number(episode?.sound_id ?? 0);
     const dramaTitle = String(episode?.drama_title ?? "").trim() || "Unknown";
+    const episodeTitle = String(episode?.episode_title ?? episode?.name ?? "").trim();
     try {
-      const result = await fetchDanmakuSummary(soundId, dramaTitle);
+      const result = await fetchDanmakuSummary(soundId, dramaTitle, episodeTitle);
       if (result.success) {
         const drama = dramaMap.get(dramaTitle);
         if (drama) {
@@ -2022,6 +2048,14 @@ async function executeMissevanIdTask(task) {
           });
         }
         task.totalDanmaku += Number(result.danmaku ?? 0);
+        if (isMissevanLikelyDanmakuOverflow({
+          danmaku: result.danmaku,
+          episodeTitle,
+        })) {
+          suspectedOverflowMainEpisodes.add(
+            buildOverflowDisplayTitle(dramaTitle, episodeTitle)
+          );
+        }
       } else {
         task.failedCount += 1;
         if (result.accessDenied) {
@@ -2066,6 +2100,7 @@ async function executeMissevanIdTask(task) {
         danmaku: drama.danmaku,
         users: drama.userSet.size,
       })),
+      suspectedOverflowMainEpisodes: Array.from(suspectedOverflowMainEpisodes),
       totalDanmaku: task.totalDanmaku,
       totalUsers: allUsers.size,
       idSelectedEpisodeCount: task.totalCount,
@@ -2095,8 +2130,9 @@ async function executeManboIdTask(task) {
       }
       const setId = String(episode?.sound_id ?? "").trim();
       const dramaTitle = String(episode?.drama_title ?? "").trim() || "Unknown";
+      const episodeTitle = String(episode?.episode_title ?? episode?.name ?? "").trim();
       try {
-        const result = await fetchManboDanmakuSummary(setId, dramaTitle);
+        const result = await fetchManboDanmakuSummary(setId, dramaTitle, episodeTitle);
         if (result.success) {
           const drama = dramaMap.get(dramaTitle);
           if (drama) {
@@ -2152,6 +2188,7 @@ async function executeManboIdTask(task) {
         danmaku: drama.danmaku,
         users: drama.userSet.size,
       })),
+      suspectedOverflowMainEpisodes: [],
       totalDanmaku: task.totalDanmaku,
       totalUsers: allUsers.size,
       idSelectedEpisodeCount: task.totalCount,
@@ -2255,6 +2292,7 @@ async function executeUnsupportedPlayCountTask(task) {
 async function executeMissevanRevenueTask(task) {
   const dramaIds = Array.isArray(task.dramaIds) ? task.dramaIds : [];
   const results = [];
+  const suspectedOverflowMainEpisodes = new Set();
   initializeRevenueProgress(task, dramaIds);
 
   updateStatsTask(task, {
@@ -2297,7 +2335,11 @@ async function executeMissevanRevenueTask(task) {
         if (task.cancelled) {
           break;
         }
-        const danmakuResult = await fetchDanmakuSummary(episode.sound_id, title);
+        const danmakuResult = await fetchDanmakuSummary(
+          episode.sound_id,
+          title,
+          String(episode?.name ?? "").trim()
+        );
         if (!danmakuResult.success) {
           failed = true;
           accessDenied = accessDenied || Boolean(danmakuResult.accessDenied);
@@ -2311,6 +2353,14 @@ async function executeMissevanRevenueTask(task) {
         (Array.isArray(danmakuResult.users) ? danmakuResult.users : []).forEach((uid) => {
           userSet.add(uid);
         });
+        if (isMissevanLikelyDanmakuOverflow({
+          danmaku: danmakuResult.danmaku,
+          episodeTitle: String(episode?.name ?? "").trim(),
+        })) {
+          suspectedOverflowMainEpisodes.add(
+            buildOverflowDisplayTitle(title, String(episode?.name ?? "").trim())
+          );
+        }
         advanceRevenueProgress(
           task,
           1,
@@ -2413,7 +2463,10 @@ async function executeMissevanRevenueTask(task) {
     return finalizeCancelledTask(task, {
       result: {
         revenueResults: results,
-        revenueSummary: createRevenueSummary(results),
+        revenueSummary: {
+          ...createRevenueSummary(results),
+          suspectedOverflowMainEpisodes: Array.from(suspectedOverflowMainEpisodes),
+        },
       },
     });
   }
@@ -2426,7 +2479,10 @@ async function executeMissevanRevenueTask(task) {
       : "收益预估完成",
     result: {
       revenueResults: results,
-      revenueSummary: createRevenueSummary(results),
+      revenueSummary: {
+        ...createRevenueSummary(results),
+        suspectedOverflowMainEpisodes: Array.from(suspectedOverflowMainEpisodes),
+      },
     },
   });
 }
@@ -2491,7 +2547,11 @@ async function executeManboRevenueTask(task) {
           if (task.cancelled) {
             break;
           }
-          const danmakuResult = await fetchManboDanmakuSummary(episode.sound_id, title);
+          const danmakuResult = await fetchManboDanmakuSummary(
+            episode.sound_id,
+            title,
+            String(episode?.name ?? "").trim()
+          );
           if (!danmakuResult.success) {
             failed = true;
             accessDenied = accessDenied || Boolean(danmakuResult.accessDenied);
@@ -3070,13 +3130,18 @@ app.post("/getsounddanmaku", async (req, res) => {
   if (!ensureMissevanEnabled(res)) {
     return;
   }
-  const { sound_id: soundId, drama_title: dramaTitle = "" } = req.body;
+  const {
+    sound_id: soundId,
+    drama_title: dramaTitle = "",
+    episode_title: episodeTitle = "",
+  } = req.body;
 
   if (!soundId) {
     return res.json({
       success: false,
       sound_id: 0,
       drama_title: dramaTitle,
+      episode_title: episodeTitle,
       danmaku: 0,
       users: [],
       accessDenied: false,
@@ -3084,7 +3149,7 @@ app.post("/getsounddanmaku", async (req, res) => {
     });
   }
 
-  const result = await fetchDanmakuSummary(soundId, dramaTitle);
+  const result = await fetchDanmakuSummary(soundId, dramaTitle, episodeTitle);
   return res.json(result);
 });
 
@@ -3325,13 +3390,18 @@ app.post("/manbo/getsetsummary", async (req, res) => {
 });
 
 app.post("/manbo/getsetdanmaku", async (req, res) => {
-  const { sound_id: setId, drama_title: dramaTitle = "" } = req.body;
+  const {
+    sound_id: setId,
+    drama_title: dramaTitle = "",
+    episode_title: episodeTitle = "",
+  } = req.body;
 
   if (!setId) {
     return res.json({
       success: false,
       sound_id: 0,
       drama_title: dramaTitle,
+      episode_title: episodeTitle,
       danmaku: 0,
       users: [],
       accessDenied: false,
@@ -3339,7 +3409,7 @@ app.post("/manbo/getsetdanmaku", async (req, res) => {
     });
   }
 
-  const result = await fetchManboDanmakuSummary(setId, dramaTitle);
+  const result = await fetchManboDanmakuSummary(setId, dramaTitle, episodeTitle);
   return res.json(result);
 });
 
@@ -3348,6 +3418,7 @@ function normalizeTaskEpisodes(rawEpisodes = []) {
     .map((episode) => ({
       sound_id: String(episode?.sound_id ?? "").trim(),
       drama_title: String(episode?.drama_title ?? "").trim(),
+      episode_title: String(episode?.episode_title ?? "").trim(),
     }))
     .filter((episode) => episode.sound_id);
 }

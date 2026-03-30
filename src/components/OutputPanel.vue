@@ -88,6 +88,19 @@
               <div class="output-stat-value">{{ totalUsers }}</div>
             </div>
           </div>
+          <div
+            v-if="Array.isArray(suspectedOverflowMainEpisodes) && suspectedOverflowMainEpisodes.length"
+            class="output-overflow-list"
+          >
+            <div class="output-stat-label">疑似弹幕溢出正片</div>
+            <div
+              v-for="title in suspectedOverflowMainEpisodes"
+              :key="`overflow-id-${title}`"
+              class="output-overflow-item"
+            >
+              {{ title }}
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -190,6 +203,19 @@
               }}
             </div>
           </div>
+          <div
+            v-if="Array.isArray(revenueSummary.suspectedOverflowMainEpisodes) && revenueSummary.suspectedOverflowMainEpisodes.length"
+            class="output-overflow-list"
+          >
+            <div class="output-stat-label">疑似弹幕溢出正片</div>
+            <div
+              v-for="title in revenueSummary.suspectedOverflowMainEpisodes"
+              :key="`overflow-revenue-${title}`"
+              class="output-overflow-item"
+            >
+              {{ title }}
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -208,6 +234,10 @@ export default {
     playCountTotal: Number,
     playCountFailed: Boolean,
     idResults: Array,
+    suspectedOverflowMainEpisodes: {
+      type: Array,
+      default: () => [],
+    },
     idSelectedEpisodeCount: Number,
     totalDanmaku: Number,
     totalUsers: Number,
@@ -455,6 +485,19 @@ export default {
   margin-top: 14px;
   padding-top: 14px;
   border-top: 1px solid rgba(29, 53, 87, 0.08);
+}
+
+.output-overflow-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(29, 53, 87, 0.08);
+}
+
+.output-overflow-item {
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 @media (max-width: 640px) {

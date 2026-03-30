@@ -109,6 +109,7 @@ export default {
             selectedEpisodes.push({
               sound_id: episode.sound_id,
               drama_title: dramaTitle,
+              episode_title: episode.name,
             });
           }
         });

@@ -17,6 +17,8 @@ upstash.env
 release
 logs
 tmp-manbo-crypto.js
+runtime/manbo-index.json
+runtime/missevan-cooldown.json
 
 # Editor directories and files
 .vscode/*
