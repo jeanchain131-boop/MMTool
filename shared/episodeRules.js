@@ -78,7 +78,10 @@ export function getMissevanDanmakuCapByDurationMs(durationMs) {
   if (normalizedDuration <= 40 * minuteMs) {
     return 25000;
   }
-  return 35000;
+  if (normalizedDuration <= 60 * minuteMs) {
+    return 35000;
+  }
+  return 50000;
 }
 
 export function isMissevanLikelyDanmakuOverflow({ durationMs, danmaku }) {

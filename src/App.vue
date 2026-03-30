@@ -1,9 +1,17 @@
 <template>
   <div class="app-shell">
     <header class="hero">
-      <p class="hero-eyebrow">{{ appConfig.brandName }}</p>
-      <h1 class="hero-title">{{ appConfig.titleZh }}</h1>
-      <p class="hero-subtitle">{{ appConfig.description }}</p>
+      <div class="hero-top">
+        <div>
+          <p class="hero-eyebrow">{{ appConfig.brandName }}</p>
+          <h1 class="hero-title">{{ appConfig.titleZh }}</h1>
+          <p class="hero-subtitle">{{ appConfig.description }}</p>
+        </div>
+        <div class="hero-version">v{{ appConfig.frontendVersion }}</div>
+      </div>
+      <div v-if="appConfig.versionMismatch" class="hero-version-alert">
+        工具已更新，请刷新或重新打开页面。若还看到此提醒，请清理缓存后再重试。
+      </div>
       <div class="platform-switch" role="tablist" aria-label="平台切换">
         <button
           v-for="platform in visiblePlatforms"
@@ -26,6 +34,8 @@
           :cooldownHours="appConfig.cooldownHours"
           :cooldownUntil="appConfig.cooldownUntil"
           :desktopAppUrl="appConfig.desktopAppUrl"
+          :frontendVersion="appConfig.frontendVersion"
+          :handleVersionResponse="updateVersionStatusFromResponse"
           @resetState="resetSearchFlow"
           @updateResults="setSearchResults"
         />
@@ -73,7 +83,9 @@
       </template>
 
       <section v-else class="panel panel-report panel-report-full">
-        <DesktopReportPanel />
+        <DesktopReportPanel
+          :handleVersionResponse="updateVersionStatusFromResponse"
+        />
       </section>
     </div>
   </div>
@@ -133,6 +145,9 @@ function getDefaultAppConfig() {
     cooldownHours: 4,
     cooldownUntil: 0,
     desktopAppUrl: "",
+    frontendVersion: typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "0.0.0",
+    backendVersion: "0.0.0",
+    versionMismatch: false,
   };
 }
 
@@ -208,6 +223,56 @@ export default {
     }
   },
   methods: {
+    normalizeVersion(value) {
+      const normalized = String(value ?? "").trim();
+      return /^\d+\.\d+\.\d+$/.test(normalized) ? normalized : "0.0.0";
+    },
+    getBackendVersionFromResponse(response, data = null) {
+      const headerVersion = this.normalizeVersion(
+        response?.headers?.get?.("X-Backend-Version") ?? ""
+      );
+      if (headerVersion !== "0.0.0") {
+        return headerVersion;
+      }
+      return this.normalizeVersion(data?.backendVersion ?? "0.0.0");
+    },
+    buildVersionedUrl(url) {
+      const separator = url.includes("?") ? "&" : "?";
+      const frontendVersion = encodeURIComponent(
+        this.normalizeVersion(this.appConfig.frontendVersion)
+      );
+      return `${url}${separator}frontendVersion=${frontendVersion}`;
+    },
+    applyVersionStatus(frontendVersion, backendVersion, versionMismatch = null) {
+      const normalizedFrontend = this.normalizeVersion(frontendVersion);
+      const normalizedBackend = this.normalizeVersion(backendVersion);
+      this.appConfig = {
+        ...this.appConfig,
+        frontendVersion: normalizedFrontend,
+        backendVersion: normalizedBackend,
+        versionMismatch: versionMismatch == null
+          ? normalizedFrontend !== normalizedBackend
+          : Boolean(versionMismatch),
+      };
+    },
+    updateVersionStatusFromResponse(data) {
+      if (!data || typeof data !== "object") {
+        return data;
+      }
+
+      const frontendVersion = this.normalizeVersion(
+        data.frontendVersion ?? this.appConfig.frontendVersion
+      );
+      const backendVersion = this.normalizeVersion(data.backendVersion ?? "0.0.0");
+      this.applyVersionStatus(frontendVersion, backendVersion, data.versionMismatch);
+      return data;
+    },
+    extractResponseItems(data) {
+      if (Array.isArray(data)) {
+        return data;
+      }
+      return Array.isArray(data?.items) ? data.items : [];
+    },
     scrollToPanel(refName) {
       if (typeof window === "undefined") return;
       this.$nextTick(() => {
@@ -224,6 +289,12 @@ export default {
     },
     applyAppConfig(config = {}) {
       const defaults = getDefaultAppConfig();
+      const frontendVersion = this.normalizeVersion(
+        config.frontendVersion ?? this.appConfig.frontendVersion ?? defaults.frontendVersion
+      );
+      const backendVersion = this.normalizeVersion(
+        config.backendVersion ?? this.appConfig.backendVersion ?? defaults.backendVersion
+      );
       this.appConfig = {
         missevanEnabled: config.missevanEnabled !== false,
         desktopApp: config.desktopApp === true,
@@ -233,6 +304,11 @@ export default {
         cooldownHours: Number(config.cooldownHours ?? defaults.cooldownHours) || defaults.cooldownHours,
         cooldownUntil: Number(config.cooldownUntil ?? 0) || 0,
         desktopAppUrl: String(config.desktopAppUrl || "").trim(),
+        frontendVersion,
+        backendVersion,
+        versionMismatch: config.versionMismatch == null
+          ? frontendVersion !== backendVersion
+          : Boolean(config.versionMismatch),
       };
       if (!this.appConfig.missevanEnabled && this.currentPlatform === "missevan") {
         this.currentPlatform = "manbo";
@@ -244,12 +320,20 @@ export default {
     },
     async loadAppConfig() {
       try {
-        const response = await fetch("/app-config");
+        const response = await fetch(this.buildVersionedUrl("/app-config"), {
+          cache: "no-store",
+        });
         if (!response.ok) {
           this.applyAppConfig();
           return;
         }
-        this.applyAppConfig(await response.json());
+        const config = await response.json();
+        const backendVersion = this.getBackendVersionFromResponse(response, config);
+        this.updateVersionStatusFromResponse({
+          ...config,
+          backendVersion,
+        });
+        this.applyAppConfig(config);
       } catch (_) {
         this.applyAppConfig();
       }
@@ -415,7 +499,7 @@ export default {
       );
     },
     async postJson(url, payload, signal, errorMessage) {
-      const response = await fetch(url, {
+      const response = await fetch(this.buildVersionedUrl(url), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -424,17 +508,29 @@ export default {
       if (!response.ok) {
         throw new Error(`${errorMessage}: ${response.status}`);
       }
-      return response.json();
+      const data = await response.json();
+      const backendVersion = this.getBackendVersionFromResponse(response, data);
+      this.updateVersionStatusFromResponse({
+        backendVersion,
+        frontendVersion: this.appConfig.frontendVersion,
+      });
+      return data;
     },
     async getJson(url, signal, errorMessage) {
-      const response = await fetch(url, {
+      const response = await fetch(this.buildVersionedUrl(url), {
         signal,
         cache: "no-store",
       });
       if (!response.ok) {
         throw new Error(`${errorMessage}: ${response.status}`);
       }
-      return response.json();
+      const data = await response.json();
+      const backendVersion = this.getBackendVersionFromResponse(response, data);
+      this.updateVersionStatusFromResponse({
+        backendVersion,
+        frontendVersion: this.appConfig.frontendVersion,
+      });
+      return data;
     },
     buildTaskSnapshotUrl(taskId) {
       const normalizedTaskId = String(taskId ?? "").trim();
@@ -582,7 +678,13 @@ export default {
     },
     async fetchEpisodeSummaries(soundIds, signal) {
       const key = this.currentPlatform === "manbo" ? "set_ids" : "sound_ids";
-      return this.postJson(this.getSummaryEndpoint(), { [key]: soundIds }, signal, "Failed to fetch play counts");
+      const data = await this.postJson(
+        this.getSummaryEndpoint(),
+        { [key]: soundIds },
+        signal,
+        "Failed to fetch play counts"
+      );
+      return this.extractResponseItems(data);
     },
     getSearchResultById(dramaId) {
       return this.currentBrowseState.searchResults.find((item) => String(item.id) === String(dramaId));
@@ -612,7 +714,7 @@ export default {
         payload.sound_id_map = soundIdMap;
       }
       const data = await this.postJson(this.getDramasEndpoint(), payload, signal, "Failed to load drama");
-      const result = data[0];
+      const result = this.extractResponseItems(data)[0];
       if (!result?.success) {
         const error = new Error(`Failed to load drama: ${dramaId}`);
         error.accessDenied = Boolean(result?.accessDenied);
@@ -1288,6 +1390,12 @@ body {
   border-radius: 26px;
   box-shadow: var(--panel-shadow);
 }
+.hero-top {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
 .hero-eyebrow {
   margin: 0 0 6px;
   color: var(--accent);
@@ -1307,6 +1415,27 @@ body {
   color: var(--text-muted);
   font-size: 14px;
   line-height: 1.65;
+}
+.hero-version {
+  flex-shrink: 0;
+  padding: 6px 10px;
+  color: var(--text-strong);
+  font-size: 12px;
+  font-weight: 800;
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(29, 53, 87, 0.08);
+  border-radius: 999px;
+}
+.hero-version-alert {
+  margin-top: 12px;
+  padding: 10px 12px;
+  color: #8a2d18;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.5;
+  background: rgba(255, 241, 235, 0.92);
+  border: 1px solid rgba(207, 92, 54, 0.2);
+  border-radius: 14px;
 }
 .platform-switch {
   display: inline-flex;
@@ -1345,8 +1474,10 @@ body {
 @media (max-width: 640px) {
   .app-shell { padding: 14px 10px 48px; }
   .hero { padding: 18px 16px; border-radius: 20px; }
+  .hero-top { display: grid; }
   .hero-title { font-size: 24px; }
   .hero-subtitle { font-size: 13px; line-height: 1.55; }
+  .hero-version { justify-self: start; }
   .platform-switch {
     display: grid;
     width: 100%;

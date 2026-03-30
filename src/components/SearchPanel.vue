@@ -115,6 +115,14 @@ export default {
       type: String,
       default: "",
     },
+    frontendVersion: {
+      type: String,
+      default: "0.0.0",
+    },
+    handleVersionResponse: {
+      type: Function,
+      default: null,
+    },
   },
   data() {
     return {
@@ -169,6 +177,34 @@ export default {
     },
   },
   methods: {
+    normalizeVersion(value) {
+      const normalized = String(value ?? "").trim();
+      return /^\d+\.\d+\.\d+$/.test(normalized) ? normalized : "0.0.0";
+    },
+    getBackendVersionFromResponse(response, data = null) {
+      const headerVersion = this.normalizeVersion(
+        response?.headers?.get?.("X-Backend-Version") ?? ""
+      );
+      if (headerVersion !== "0.0.0") {
+        return headerVersion;
+      }
+      return this.normalizeVersion(data?.backendVersion ?? "0.0.0");
+    },
+    buildVersionedUrl(url) {
+      const separator = url.includes("?") ? "&" : "?";
+      const frontendVersion = encodeURIComponent(this.normalizeVersion(this.frontendVersion));
+      return `${url}${separator}frontendVersion=${frontendVersion}`;
+    },
+    async parseVersionedJson(response) {
+      const data = await response.json();
+      if (typeof this.handleVersionResponse === "function") {
+        this.handleVersionResponse({
+          frontendVersion: this.normalizeVersion(this.frontendVersion),
+          backendVersion: this.getBackendVersionFromResponse(response, data),
+        });
+      }
+      return data;
+    },
     clearManualInput() {
       this.keyword = "";
       this.manboKeyword = "";
@@ -176,11 +212,13 @@ export default {
     },
     async fetchAppConfig() {
       try {
-        const response = await fetch("/app-config");
+        const response = await fetch(this.buildVersionedUrl("/app-config"), {
+          cache: "no-store",
+        });
         if (!response.ok) {
           return null;
         }
-        return response.json();
+        return this.parseVersionedJson(response);
       } catch (_) {
         return null;
       }
@@ -241,9 +279,9 @@ export default {
 
         try {
           const response = await fetch(
-            `/manbo/search?keyword=${encodeURIComponent(keyword)}`
+            this.buildVersionedUrl(`/manbo/search?keyword=${encodeURIComponent(keyword)}`)
           );
-          const data = await response.json();
+          const data = await this.parseVersionedJson(response);
 
           this.$emit("updateResults", Array.isArray(data.results) ? data.results : []);
           if (!data.success) {
@@ -272,9 +310,9 @@ export default {
 
       try {
         const response = await fetch(
-          `/search?keyword=${encodeURIComponent(keyword)}`
+          this.buildVersionedUrl(`/search?keyword=${encodeURIComponent(keyword)}`)
         );
-        const data = await response.json();
+        const data = await this.parseVersionedJson(response);
 
         if (data.success) {
           this.$emit("updateResults", data.results);
@@ -328,12 +366,12 @@ export default {
       this.isManualPending = true;
 
       try {
-        const response = await fetch("/getdramacards", {
+        const response = await fetch(this.buildVersionedUrl("/getdramacards"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ drama_ids: ids }),
         });
-        const data = await response.json();
+        const data = await this.parseVersionedJson(response);
 
         if (!data.success) {
           if (data.accessDenied) {
@@ -390,12 +428,12 @@ export default {
           })
         );
 
-        const response = await fetch("/manbo/getdramacards", {
+        const response = await fetch(this.buildVersionedUrl("/manbo/getdramacards"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ items }),
         });
-        const data = await response.json();
+        const data = await this.parseVersionedJson(response);
 
         if (!data.success) {
           alert("Manbo 导入失败，请检查输入内容");

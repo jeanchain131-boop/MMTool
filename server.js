@@ -3,12 +3,15 @@ import cors from "cors";
 import express from "express";
 import fetch from "node-fetch";
 import https from "https";
+import { createRequire } from "module";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createManboIndexStore, normalizeManboIndexName } from "./manboIndexStore.js";
 import { loadLocalEnv } from "./envConfig.js";
 import { isMissevanLikelyDanmakuOverflow } from "./shared/episodeRules.js";
 
+const require = createRequire(import.meta.url);
+const packageJson = require("./package.json");
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 await loadLocalEnv({
@@ -25,6 +28,7 @@ const appDataDir = process.env.APP_DATA_DIR
 const logsDir = path.join(appDataDir, "logs");
 const runtimeDir = path.join(appDataDir, "runtime");
 const usageLogPath = path.join(logsDir, "usage.log");
+const APP_VERSION = String(packageJson.version || "0.0.0").trim() || "0.0.0";
 const MISSEVAN_ENABLED = process.env.ENABLE_MISSEVAN !== "false";
 const DESKTOP_APP = process.env.DESKTOP_APP === "true";
 const MISSEVAN_COOLDOWN_HOURS = Math.max(
@@ -91,7 +95,26 @@ let cooldownStateLoaded = false;
 app.use(cors());
 app.use(express.json());
 
+function normalizeVersion(value) {
+  const normalized = String(value ?? "").trim();
+  return /^\d+\.\d+\.\d+$/.test(normalized) ? normalized : "0.0.0";
+}
+
+function getFrontendVersionFromRequest(req) {
+  return normalizeVersion(
+    req.query?.frontendVersion
+      ?? req.headers["x-frontend-version"]
+      ?? "0.0.0"
+  );
+}
+
+app.use((req, res, next) => {
+  res.setHeader("X-Backend-Version", APP_VERSION);
+  next();
+});
+
 app.get("/app-config", (req, res) => {
+  const frontendVersion = getFrontendVersionFromRequest(req);
   res.json({
     missevanEnabled: MISSEVAN_ENABLED,
     desktopApp: DESKTOP_APP,
@@ -103,6 +126,8 @@ app.get("/app-config", (req, res) => {
     cooldownHours: MISSEVAN_COOLDOWN_HOURS,
     cooldownUntil: isInAccessDeniedCooldown() ? accessDeniedUntil : 0,
     desktopAppUrl: MISSEVAN_DESKTOP_APP_URL,
+    frontendVersion,
+    versionMismatch: frontendVersion !== APP_VERSION,
   });
 });
 

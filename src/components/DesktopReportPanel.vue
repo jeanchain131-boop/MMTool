@@ -148,6 +148,12 @@ function sortResults(rows) {
 
 export default {
   name: "DesktopReportPanel",
+  props: {
+    handleVersionResponse: {
+      type: Function,
+      default: null,
+    },
+  },
   data() {
     return {
       ...createDefaultState(),
@@ -191,6 +197,28 @@ export default {
   methods: {
     getDesktopApi() {
       return typeof window !== "undefined" ? window.desktopExcel : null;
+    },
+    normalizeVersion(value) {
+      const normalized = String(value ?? "").trim();
+      return /^\d+\.\d+\.\d+$/.test(normalized) ? normalized : "0.0.0";
+    },
+    getBackendVersionFromResponse(response, data = null) {
+      const headerVersion = this.normalizeVersion(
+        response?.headers?.get?.("X-Backend-Version") ?? ""
+      );
+      if (headerVersion !== "0.0.0") {
+        return headerVersion;
+      }
+      return this.normalizeVersion(data?.backendVersion ?? "0.0.0");
+    },
+    async parseVersionedJson(response) {
+      const data = await response.json();
+      if (typeof this.handleVersionResponse === "function") {
+        this.handleVersionResponse({
+          backendVersion: this.getBackendVersionFromResponse(response, data),
+        });
+      }
+      return data;
     },
     async pickTemplate() {
       const desktopApi = this.getDesktopApi();
@@ -242,7 +270,7 @@ export default {
       if (!response.ok) {
         throw new Error(`${errorMessage}: ${response.status}`);
       }
-      return response.json();
+      return this.parseVersionedJson(response);
     },
     getDramaEndpoint(platform) {
       return platform === "missevan" ? "/getdramas" : "/manbo/getdramas";
