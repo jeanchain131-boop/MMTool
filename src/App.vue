@@ -13,12 +13,17 @@
         <button
           class="primary-action"
           type="button"
-          :disabled="!recommendedRegion || !recommendedRegion.isReady"
+          :disabled="!recommendedRegion || !recommendedRegion.canOpen || wakeupState.pending"
           @click="openRegion(recommendedRegion)"
         >
           {{ primaryActionLabel }}
         </button>
-        <button class="secondary-action" type="button" @click="refreshAllRegions">
+        <button
+          class="secondary-action"
+          type="button"
+          :disabled="wakeupState.pending"
+          @click="refreshAllRegions"
+        >
           刷新节点状态
         </button>
       </div>
@@ -61,7 +66,7 @@
           <button
             class="card-action"
             type="button"
-            :disabled="!region.isReady"
+            :disabled="!region.canOpen || wakeupState.pending"
             @click="openRegion(region)"
           >
             {{ region.actionLabel }}
@@ -69,10 +74,36 @@
         </div>
       </article>
     </section>
+
+    <div v-if="wakeupState.visible" class="wakeup-backdrop" @click.self="dismissWakeupState">
+      <section class="wakeup-card" aria-live="polite">
+        <div class="wakeup-badge">{{ wakeupState.pending ? "正在唤醒节点" : "节点暂未就绪" }}</div>
+        <h2 class="wakeup-title">{{ wakeupState.title }}</h2>
+        <p class="wakeup-text">{{ wakeupState.detail }}</p>
+        <p v-if="wakeupState.error" class="wakeup-error">{{ wakeupState.error }}</p>
+        <div class="wakeup-actions">
+          <button
+            v-if="wakeupState.canRetry"
+            class="primary-action"
+            type="button"
+            @click="retryWakeup"
+          >
+            再试一次
+          </button>
+          <button class="secondary-action" type="button" @click="dismissWakeupState">
+            {{ wakeupState.pending ? "先返回首页" : "关闭" }}
+          </button>
+        </div>
+      </section>
+    </div>
   </div>
 </template>
 
 <script>
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function normalizeVersion(value) {
   const normalized = String(value ?? "").trim();
   return /^\d+\.\d+\.\d+$/.test(normalized) ? normalized : "0.0.0";
@@ -103,7 +134,12 @@ function createRegionState(key, label, baseUrl) {
     frontendVersion: "0.0.0",
     desktopApp: false,
     versionMismatch: false,
+    requestToken: 0,
   };
+}
+
+function isAbortError(error) {
+  return error?.name === "AbortError";
 }
 
 export default {
@@ -126,6 +162,17 @@ export default {
         createRegionState("area2", "节点2", area2Url),
         createRegionState("area3", "节点3", area3Url),
       ],
+      wakeupState: {
+        visible: false,
+        pending: false,
+        regionKey: "",
+        title: "",
+        detail: "",
+        error: "",
+        canRetry: false,
+      },
+      wakeupAttemptId: 0,
+      wakeupAbortController: null,
     };
   },
   computed: {
@@ -134,6 +181,7 @@ export default {
         const hasConfig = Boolean(region.baseUrl);
         const isCoolingDown = hasConfig && Number(region.cooldownUntil ?? 0) > Date.now();
         const isReady = hasConfig && !region.requestFailed;
+        const canOpen = hasConfig;
         const cooldownText = !hasConfig
           ? "未配置"
           : region.requestFailed
@@ -155,6 +203,7 @@ export default {
           ...region,
           isCoolingDown,
           isReady,
+          canOpen,
           cooldownText,
           statusTone,
           statusTitle,
@@ -169,7 +218,11 @@ export default {
                 ? "已启用"
                 : "未启用",
           manboText: !hasConfig ? "未配置" : "可用",
-          actionLabel: isReady ? "进入该节点" : "暂不可用",
+          actionLabel: !canOpen
+            ? "暂不可用"
+            : this.wakeupState.pending && this.wakeupState.regionKey === region.key
+              ? "正在唤醒..."
+              : "进入该节点",
         };
       });
     },
@@ -197,7 +250,10 @@ export default {
       if (!this.recommendedRegion) {
         return "请先配置节点地址";
       }
-      if (this.recommendedRegion.isReady) {
+      if (this.wakeupState.pending) {
+        return "正在唤醒节点...";
+      }
+      if (this.recommendedRegion.canOpen) {
         return `直接进入 ${this.recommendedRegion.label}`;
       }
       return `${this.recommendedRegion.label} 当前不可用`;
@@ -213,6 +269,36 @@ export default {
     },
     buildRegionEntryUrl(baseUrl) {
       return `${baseUrl}/tool`;
+    },
+    applyRegionConfig(region, data) {
+      region.missevanEnabled = data.missevanEnabled !== false;
+      region.cooldownUntil = Number(data.cooldownUntil ?? 0) || 0;
+      region.cooldownHours = Number(data.cooldownHours ?? 0) || 0;
+      region.frontendVersion = normalizeVersion(data.frontendVersion ?? "0.0.0");
+      region.desktopApp = data.desktopApp === true;
+      region.versionMismatch = Boolean(data.versionMismatch);
+    },
+    async fetchRegionConfig(region, timeoutMs = 12000, controller = null) {
+      const activeController = controller
+        || (typeof AbortController !== "undefined" ? new AbortController() : null);
+      const timeoutId = activeController
+        ? window.setTimeout(() => activeController.abort(), timeoutMs)
+        : null;
+
+      try {
+        const response = await fetch(this.buildRegionAppConfigUrl(region.baseUrl), {
+          cache: "no-store",
+          signal: activeController?.signal,
+        });
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        return await response.json();
+      } finally {
+        if (timeoutId != null) {
+          window.clearTimeout(timeoutId);
+        }
+      }
     },
     pickPreferredRegion(regions) {
       const preferredOrder = ["area1", "area2", "area3"];
@@ -244,37 +330,142 @@ export default {
         return;
       }
 
+      const requestToken = region.requestToken + 1;
+      region.requestToken = requestToken;
       region.loading = true;
       region.requestFailed = false;
       region.requestError = "";
 
       try {
-        const response = await fetch(this.buildRegionAppConfigUrl(region.baseUrl), {
-          cache: "no-store",
-        });
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
+        const data = await this.fetchRegionConfig(region);
+        if (requestToken !== region.requestToken) {
+          return;
         }
-        const data = await response.json();
-        region.missevanEnabled = data.missevanEnabled !== false;
-        region.cooldownUntil = Number(data.cooldownUntil ?? 0) || 0;
-        region.cooldownHours = Number(data.cooldownHours ?? 0) || 0;
-        region.frontendVersion = normalizeVersion(data.frontendVersion ?? "0.0.0");
-        region.desktopApp = data.desktopApp === true;
-        region.versionMismatch = Boolean(data.versionMismatch);
+        this.applyRegionConfig(region, data);
       } catch (error) {
+        if (requestToken !== region.requestToken || isAbortError(error)) {
+          return;
+        }
         region.requestFailed = true;
         region.requestError = error instanceof Error ? error.message : String(error);
       } finally {
-        region.loading = false;
+        if (requestToken === region.requestToken) {
+          region.loading = false;
+        }
       }
     },
     async refreshAllRegions() {
       await Promise.all(this.regions.map((region) => this.refreshRegion(region)));
     },
-    openRegion(region) {
-      if (!region?.isReady || !region.baseUrl || typeof window === "undefined") {
+    getRegionByKey(key) {
+      return this.regions.find((region) => region.key === key) || null;
+    },
+    dismissWakeupState() {
+      this.wakeupAttemptId += 1;
+      this.wakeupAbortController?.abort();
+      this.wakeupAbortController = null;
+      this.wakeupState = {
+        visible: false,
+        pending: false,
+        regionKey: "",
+        title: "",
+        detail: "",
+        error: "",
+        canRetry: false,
+      };
+    },
+    async retryWakeup() {
+      const region = this.getRegionByKey(this.wakeupState.regionKey);
+      if (!region) {
+        this.dismissWakeupState();
         return;
+      }
+      await this.openRegion(region);
+    },
+    async waitForRegionWakeup(region, attemptId) {
+      const maxAttempts = 6;
+      let lastError = "";
+
+      for (let index = 0; index < maxAttempts; index += 1) {
+        if (attemptId !== this.wakeupAttemptId) {
+          return false;
+        }
+
+        this.wakeupState = {
+          visible: true,
+          pending: true,
+          regionKey: region.key,
+          title: `正在唤醒 ${region.label}`,
+          detail: `节点可能正在从 Render 休眠中恢复，通常需要 10-60 秒。当前是第 ${index + 1} 次检查。`,
+          error: "",
+          canRetry: false,
+        };
+
+        try {
+          this.wakeupAbortController = typeof AbortController !== "undefined"
+            ? new AbortController()
+            : null;
+          const requestToken = region.requestToken + 1;
+          region.requestToken = requestToken;
+          const data = await this.fetchRegionConfig(region, 15000, this.wakeupAbortController);
+          if (attemptId !== this.wakeupAttemptId) {
+            return false;
+          }
+          if (requestToken !== region.requestToken) {
+            continue;
+          }
+          region.requestFailed = false;
+          region.requestError = "";
+          region.loading = false;
+          this.applyRegionConfig(region, data);
+          this.wakeupAbortController = null;
+          return true;
+        } catch (error) {
+          if (attemptId !== this.wakeupAttemptId) {
+            return false;
+          }
+          if (isAbortError(error)) {
+            return false;
+          }
+          lastError = error instanceof Error ? error.message : String(error);
+          this.wakeupAbortController = null;
+          region.loading = false;
+          region.requestFailed = true;
+          region.requestError = lastError;
+        }
+
+        if (index < maxAttempts - 1) {
+          await sleep(4000);
+        }
+      }
+
+      if (attemptId === this.wakeupAttemptId) {
+        this.wakeupState = {
+          visible: true,
+          pending: false,
+          regionKey: region.key,
+          title: `${region.label} 还没有完全唤醒`,
+          detail: "节点可能仍在冷启动中。你可以继续重试，或者稍后再回来进入这个节点。",
+          error: lastError ? `最近一次检查结果：${lastError}` : "",
+          canRetry: true,
+        };
+      }
+
+      return false;
+    },
+    async openRegion(region) {
+      if (!region?.baseUrl || typeof window === "undefined" || this.wakeupState.pending) {
+        return;
+      }
+      const liveRegion = this.getRegionByKey(region.key) || region;
+      if (liveRegion.loading || liveRegion.requestFailed) {
+        const attemptId = this.wakeupAttemptId + 1;
+        this.wakeupAttemptId = attemptId;
+        const awakened = await this.waitForRegionWakeup(liveRegion, attemptId);
+        if (!awakened || attemptId !== this.wakeupAttemptId) {
+          return;
+        }
+        this.dismissWakeupState();
       }
       window.location.assign(this.buildRegionEntryUrl(region.baseUrl));
     },
@@ -512,6 +703,60 @@ button {
   width: 100%;
 }
 
+.wakeup-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  padding: 18px;
+  place-items: center;
+  background: rgba(18, 28, 39, 0.32);
+  backdrop-filter: blur(8px);
+}
+
+.wakeup-card {
+  width: min(520px, 100%);
+  padding: 24px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(29, 53, 87, 0.12);
+  border-radius: 24px;
+  box-shadow: 0 26px 56px rgba(31, 43, 58, 0.16);
+}
+
+.wakeup-badge {
+  display: inline-flex;
+  padding: 6px 10px;
+  color: var(--info);
+  font-size: 12px;
+  font-weight: 800;
+  background: rgba(47, 93, 124, 0.1);
+  border-radius: 999px;
+}
+
+.wakeup-title {
+  margin: 14px 0 8px;
+  font-size: 28px;
+  line-height: 1.15;
+}
+
+.wakeup-text,
+.wakeup-error {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.7;
+}
+
+.wakeup-error {
+  margin-top: 10px;
+  color: var(--error);
+}
+
+.wakeup-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
+}
+
 @media (max-width: 760px) {
   .landing-shell {
     padding: 16px 12px 44px;
@@ -540,6 +785,19 @@ button {
 
   .region-grid {
     grid-template-columns: 1fr;
+  }
+
+  .wakeup-card {
+    padding: 20px 18px;
+    border-radius: 20px;
+  }
+
+  .wakeup-title {
+    font-size: 24px;
+  }
+
+  .wakeup-actions {
+    display: grid;
   }
 }
 </style>
