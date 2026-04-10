@@ -9,7 +9,6 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   buildVersionedUrl,
   getBackendVersionFromResponse,
-  getRemainingCooldownHours,
   normalizeVersion,
   parseNumericIds,
   parseRawItems,
@@ -72,6 +71,39 @@ export function SearchPanel({
     onNotice?.({ title, description });
   }
 
+  function getRemainingCooldownMinutes(config = null) {
+    const until = Number(config?.cooldownUntil ?? cooldownUntil ?? 0);
+    if (until > Date.now()) {
+      return Math.max(1, Math.ceil((until - Date.now()) / 60000));
+    }
+    const fallbackHours = Number(config?.cooldownHours ?? cooldownHours ?? 4) || 4;
+    return Math.max(1, Math.ceil(fallbackHours * 60));
+  }
+
+  function showMissevanCooldownNotice(config = null) {
+    showBlockingNotice("", `Missevan目前受限中，请${getRemainingCooldownMinutes(config)}分钟后再来`);
+  }
+
+  async function logMissevanCooldownBlocked(action, extra = {}) {
+    try {
+      await fetch(buildVersionedUrl("/usage-log", frontendVersion), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          platform: "missevan",
+          action,
+          accessDenied: true,
+          success: false,
+          error: "ACCESS_DENIED_COOLDOWN:frontend_precheck",
+          cooldownUntil: Number(cooldownUntil ?? 0) || 0,
+          ...extra,
+        }),
+      });
+    } catch (error) {
+      console.error("Failed to log frontend cooldown block", error);
+    }
+  }
+
   function clearManualInput() {
     onUpdateFormState?.({
       keyword: "",
@@ -86,6 +118,12 @@ export function SearchPanel({
 
     const keyword = String(formState?.keyword ?? "").trim();
     if (!keyword) {
+      return;
+    }
+
+    if (platform === "missevan" && !isDesktopApp && Number(cooldownUntil ?? 0) > Date.now()) {
+      await logMissevanCooldownBlocked("search", { keyword });
+      showMissevanCooldownNotice();
       return;
     }
 
@@ -130,12 +168,14 @@ export function SearchPanel({
       }
       if (data.accessDenied) {
         const config = await fetchAppConfig();
-        showBlockingNotice(
-          "Missevan 当前受限",
-          isDesktopApp
-            ? "如果看到访问受限，请先使用任意浏览器打开猫耳主页完成验证后再重试。"
-            : `请 ${getRemainingCooldownHours(config || { cooldownHours, cooldownUntil }, cooldownHours)} 小时后再来。`
-        );
+        if (isDesktopApp) {
+          showBlockingNotice(
+            "Missevan 当前受限",
+            "如果看到访问受限，请先使用任意浏览器打开猫耳主页完成验证后再重试。"
+          );
+        } else {
+          showMissevanCooldownNotice(config || { cooldownHours, cooldownUntil });
+        }
         return;
       }
       showBlockingNotice("搜索失败", data.message || "搜索失败或没有结果");
@@ -202,6 +242,14 @@ export function SearchPanel({
       return;
     }
 
+    if (platform === "missevan" && !isDesktopApp && Number(cooldownUntil ?? 0) > Date.now()) {
+      await logMissevanCooldownBlocked("manual_import", {
+        manualInputCount: parseNumericIds(formState?.manualInput).length,
+      });
+      showMissevanCooldownNotice();
+      return;
+    }
+
     setIsManualPending(true);
 
     try {
@@ -233,12 +281,14 @@ export function SearchPanel({
       if (!data.success) {
         if (data.accessDenied) {
           const config = await fetchAppConfig();
-          showBlockingNotice(
-            "Missevan 当前受限",
-            isDesktopApp
-              ? "如果看到访问受限，请先使用任意浏览器打开猫耳主页完成验证后再重试。"
-              : `请 ${getRemainingCooldownHours(config || { cooldownHours, cooldownUntil }, cooldownHours)} 小时后再来。`
-          );
+          if (isDesktopApp) {
+            showBlockingNotice(
+              "Missevan 当前受限",
+              "如果看到访问受限，请先使用任意浏览器打开猫耳主页完成验证后再重试。"
+            );
+          } else {
+            showMissevanCooldownNotice(config || { cooldownHours, cooldownUntil });
+          }
           return;
         }
         showBlockingNotice("导入作品失败", "请检查输入的作品 ID。");

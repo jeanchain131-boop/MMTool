@@ -646,6 +646,35 @@ function normalizeKeyword(keyword) {
   return String(keyword ?? "").trim().slice(0, 200);
 }
 
+function isSameHostUsageLogRequest(req) {
+  const requestHost = String(req.get("host") || "")
+    .trim()
+    .toLowerCase();
+  if (!requestHost) {
+    return false;
+  }
+
+  const origin = String(req.get("origin") || "").trim();
+  if (origin) {
+    try {
+      return new URL(origin).host.toLowerCase() === requestHost;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  const referer = String(req.get("referer") || "").trim();
+  if (referer) {
+    try {
+      return new URL(referer).host.toLowerCase() === requestHost;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  return false;
+}
+
 function normalizeSearchOffset(value) {
   const normalized = Number(value);
   return Number.isFinite(normalized) && normalized > 0
@@ -4823,6 +4852,69 @@ app.post("/register-new-drama-ids", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to register drama ids",
+    });
+  }
+});
+
+app.post("/usage-log", async (req, res) => {
+  try {
+    if (!isSameHostUsageLogRequest(req)) {
+      return res.status(403).json({
+        success: false,
+        message: "Forbidden usage log request",
+      });
+    }
+
+    const payload = req.body && typeof req.body === "object" ? req.body : {};
+    const platform = String(payload.platform ?? "").trim();
+    const action = String(payload.action ?? "").trim();
+    const error = String(payload.error ?? "").trim();
+
+    if (
+      platform !== "missevan" ||
+      !["search", "manual_import"].includes(action) ||
+      error !== "ACCESS_DENIED_COOLDOWN:frontend_precheck"
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid usage log payload",
+      });
+    }
+
+    const sanitizedEntry = {
+      platform,
+      action,
+      accessDenied: true,
+      success: false,
+      error,
+      cooldownUntil: Math.max(0, Number(payload.cooldownUntil ?? 0) || 0),
+    };
+
+    if (action === "search") {
+      const keyword = normalizeKeyword(payload.keyword);
+      if (!keyword) {
+        return res.status(400).json({
+          success: false,
+          message: "Missing search keyword",
+        });
+      }
+      sanitizedEntry.keyword = keyword;
+    }
+
+    if (action === "manual_import") {
+      sanitizedEntry.manualInputCount = Math.max(
+        0,
+        Math.min(200, Math.floor(Number(payload.manualInputCount ?? 0) || 0))
+      );
+    }
+
+    await writeUsageLog(sanitizedEntry);
+    return res.json({ success: true });
+  } catch (error) {
+    console.error("Failed to write usage log from client payload", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to write usage log",
     });
   }
 });
