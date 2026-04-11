@@ -1689,6 +1689,9 @@ async function hydrateMissevanSearchRecord(record) {
       reward_num: rewardNum,
     };
   } catch (error) {
+    if (isMissevanAccessDenied(error)) {
+      throw error;
+    }
     if (!isMissevanAccessDenied(error)) {
       console.error(
         `Failed to hydrate Missevan search result drama_id=${record.dramaId}`,
@@ -1747,6 +1750,9 @@ async function hydrateMissevanApiSearchRecord(record) {
       main_cv_text: buildMainCvText(mainCvs),
     };
   } catch (error) {
+    if (isMissevanAccessDenied(error)) {
+      throw error;
+    }
     if (!isMissevanAccessDenied(error)) {
       console.error(
         `Failed to hydrate Missevan API search result drama_id=${record.dramaId}`,

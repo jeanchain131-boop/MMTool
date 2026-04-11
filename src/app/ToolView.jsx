@@ -332,14 +332,15 @@ export function ToolView({ initialAppConfig }) {
 
       if (!data?.success) {
         if (platform === "missevan" && data?.accessDenied) {
+          resetSearchFlow(platform);
           await showMissevanAccessHint();
         } else {
           toast.error("加载更多结果失败，请稍后重试。");
+          updatePlatformState(platform, (current) => ({
+            ...current,
+            isLoadingMoreResults: false,
+          }));
         }
-        updatePlatformState(platform, (current) => ({
-          ...current,
-          isLoadingMoreResults: false,
-        }));
         return;
       }
 
