@@ -83,6 +83,44 @@ function ResultCard({ title, metrics, insetInverted = false, footer = null }) {
   );
 }
 
+function OverflowEpisodeList({ titles = [] }) {
+  if (!titles?.length) {
+    return null;
+  }
+
+  return (
+    <div className="grid gap-2 rounded-[calc(var(--radius)-0.08rem)] border border-border/80 bg-background/96 p-3 text-foreground">
+      <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+        疑似弹幕溢出分集
+      </div>
+      {titles.map((item) => (
+        <div key={item.key} className="text-sm">
+          {item.title}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function getOverflowEpisodesForDrama(dramaId, keys = []) {
+  const normalizedDramaId = String(dramaId ?? "").trim();
+  if (!normalizedDramaId || !Array.isArray(keys) || keys.length === 0) {
+    return [];
+  }
+
+  const prefix = `${normalizedDramaId}-`;
+  const filteredTitles = keys.flatMap((key) => {
+    const normalizedKey = String(key ?? "").trim();
+    if (!normalizedKey || !normalizedKey.startsWith(prefix)) {
+      return [];
+    }
+    const episodeTitle = normalizedKey.slice(prefix.length).trim();
+    return [{ key: normalizedKey, title: episodeTitle || "未知分集" }];
+  });
+
+  return filteredTitles;
+}
+
 export function OutputPanel({
   platform,
   progress,
@@ -250,52 +288,41 @@ export function OutputPanel({
               title={`汇总 / 已选 ${idSelectedEpisodeCount} 集`}
               metrics={[]}
               footer={
-                <div className="grid gap-3">
-                  <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-                    {[
-                      { label: "总弹幕数", value: formatPlainNumber(totalDanmaku) },
-                      { label: "总去重", value: formatPlainNumber(totalUsers) },
-                    ].map((metric, metricIndex) => (
-                      <div key={`summary-${metric.label}`} className={`min-w-0 rounded-[calc(var(--radius)-0.12rem)] border px-2 py-2 text-center sm:px-3 ${getMetricToneClass(metricIndex + idResults.length)}`}>
-                        <div className={`text-[10px] sm:text-xs ${getMetricLabelClass(metricIndex + idResults.length)}`}>{metric.label}</div>
-                        <div className="mt-1 break-words text-sm font-semibold leading-tight sm:text-lg">{metric.value}</div>
-                      </div>
-                    ))}
-                  </div>
-                  {suspectedOverflowEpisodes?.length ? (
-                    <div className="grid gap-2 rounded-[calc(var(--radius)-0.08rem)] border border-border/80 bg-background/96 p-3 text-foreground">
-                      <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                        疑似弹幕溢出分集
-                      </div>
-                      {suspectedOverflowEpisodes.map((title) => (
-                        <div key={`overflow-${title}`} className="text-sm">
-                          {title}
-                        </div>
-                      ))}
+                <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+                  {[
+                    { label: "总弹幕数", value: formatPlainNumber(totalDanmaku) },
+                    { label: "总去重", value: formatPlainNumber(totalUsers) },
+                  ].map((metric, metricIndex) => (
+                    <div key={`summary-${metric.label}`} className={`min-w-0 rounded-[calc(var(--radius)-0.12rem)] border px-2 py-2 text-center sm:px-3 ${getMetricToneClass(metricIndex + idResults.length)}`}>
+                      <div className={`text-[10px] sm:text-xs ${getMetricLabelClass(metricIndex + idResults.length)}`}>{metric.label}</div>
+                      <div className="mt-1 break-words text-sm font-semibold leading-tight sm:text-lg">{metric.value}</div>
                     </div>
-                  ) : null}
+                  ))}
                 </div>
               }
             />
             {idResults.map((drama) => (
               <ResultCard
-                key={`id-${drama.title}`}
+                key={`id-${drama.dramaId || drama.title}`}
                 title={`${drama.title} / 已选 ${drama.selectedEpisodeCount} 集`}
                 metrics={[]}
                 footer={
-                  <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-                    {[
-                      { label: "总弹幕数", value: formatPlainNumber(drama.danmaku) },
-                      { label: "去重 ID 数", value: formatPlainNumber(drama.users) },
-                    ].map((metric, metricIndex) => (
-                      <div
-                        key={`${drama.title}-${metric.label}`}
-                        className={`min-w-0 rounded-md border px-2 py-2 text-center sm:px-3 ${getMetricToneClass(metricIndex)}`}
-                      >
-                        <div className={`text-[10px] sm:text-xs ${getMetricLabelClass(metricIndex)}`}>{metric.label}</div>
-                        <div className="mt-1 break-words text-sm font-semibold leading-tight sm:text-lg">{metric.value}</div>
-                      </div>
-                    ))}
+                  <div className="grid gap-3">
+                    <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+                      {[
+                        { label: "总弹幕数", value: formatPlainNumber(drama.danmaku) },
+                        { label: "去重 ID 数", value: formatPlainNumber(drama.users) },
+                      ].map((metric, metricIndex) => (
+                        <div
+                          key={`${drama.dramaId || drama.title}-${metric.label}`}
+                          className={`min-w-0 rounded-md border px-2 py-2 text-center sm:px-3 ${getMetricToneClass(metricIndex)}`}
+                        >
+                          <div className={`text-[10px] sm:text-xs ${getMetricLabelClass(metricIndex)}`}>{metric.label}</div>
+                          <div className="mt-1 break-words text-sm font-semibold leading-tight sm:text-lg">{metric.value}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <OverflowEpisodeList titles={getOverflowEpisodesForDrama(drama.dramaId, suspectedOverflowEpisodes)} />
                   </div>
                 }
               />
@@ -346,34 +373,39 @@ export function OutputPanel({
               />
             ) : null}
 
-            {revenueResults.map((drama) => (
-              <ResultCard
-                key={`revenue-${drama.dramaId}`}
-                title={drama.subtitle || `${drama.title} / 单价 ${drama.price || 0} 钻石`}
-                insetInverted={false}
-                metrics={[
-                  {
-                    label: getPaidCountLabel(drama),
-                    value: drama.failed ? "访问失败" : formatPlainNumber(drama.paidUserCount),
-                  },
-                  {
-                    label: getRewardLabel(drama),
-                    value: drama.failed ? "访问失败" : formatRewardMetricValue(drama),
-                  },
-                  ...(hasRewardNum(drama)
-                    ? [{ label: "打赏人数", value: formatPlainNumber(drama.rewardNum) }]
-                    : []),
-                  {
-                    label: getRevenueLabel(drama),
-                    value: drama.failed
-                      ? "预估失败"
-                      : shouldShowRevenueRange(drama)
-                        ? formatUnitlessMetricRange(drama.minRevenueYuan, drama.maxRevenueYuan)
-                        : formatUnitlessMetricValue(drama.estimatedRevenueYuan),
-                  },
-                ]}
-              />
-            ))}
+            {revenueResults.map((drama) => {
+              const overflowTitles = getOverflowEpisodesForDrama(drama.dramaId, suspectedOverflowEpisodes);
+
+              return (
+                <ResultCard
+                  key={`revenue-${drama.dramaId}`}
+                  title={drama.subtitle || `${drama.title} / 单价 ${drama.price || 0} 钻石`}
+                  insetInverted={false}
+                  metrics={[
+                    {
+                      label: getPaidCountLabel(drama),
+                      value: drama.failed ? "访问失败" : formatPlainNumber(drama.paidUserCount),
+                    },
+                    {
+                      label: getRewardLabel(drama),
+                      value: drama.failed ? "访问失败" : formatRewardMetricValue(drama),
+                    },
+                    ...(hasRewardNum(drama)
+                      ? [{ label: "打赏人数", value: formatPlainNumber(drama.rewardNum) }]
+                      : []),
+                    {
+                      label: getRevenueLabel(drama),
+                      value: drama.failed
+                        ? "预估失败"
+                        : shouldShowRevenueRange(drama)
+                          ? formatUnitlessMetricRange(drama.minRevenueYuan, drama.maxRevenueYuan)
+                          : formatUnitlessMetricValue(drama.estimatedRevenueYuan),
+                    },
+                  ]}
+                  footer={<OverflowEpisodeList titles={overflowTitles} />}
+                />
+              );
+            })}
           </div>
         ) : null}
       </CardContent>

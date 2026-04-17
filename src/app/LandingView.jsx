@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { RefreshCcwIcon } from "lucide-react";
+import { MessageSquarePlusIcon, RefreshCcwIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -183,8 +183,16 @@ export function LandingView({ appConfig = getDefaultGatewayConfig() }) {
               })}
             </div>
 
-            <div className="relative flex flex-col gap-2.5 sm:flex-row sm:justify-end">
-              <Button variant="outline" className="h-10 px-4" disabled={loading} onClick={refreshAllRegions}>
+            <div className="relative flex flex-row flex-wrap justify-end gap-2.5">
+              {appConfig.featureSuggestionUrl ? (
+                <Button variant="outline" className="h-10 min-w-fit px-3 sm:px-4" asChild>
+                  <a href={appConfig.featureSuggestionUrl} rel="noreferrer" target="_blank">
+                    <MessageSquarePlusIcon data-icon="inline-start" />
+                    功能建议
+                  </a>
+                </Button>
+              ) : null}
+              <Button variant="outline" className="h-10 min-w-fit px-3 sm:px-4" disabled={loading} onClick={refreshAllRegions}>
                 <RefreshCcwIcon data-icon="inline-start" className={loading ? "animate-spin" : ""} />
                 {loading ? "正在刷新..." : "刷新状态"}
               </Button>

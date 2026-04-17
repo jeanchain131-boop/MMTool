@@ -32,3 +32,4 @@ runtime/missevan-cooldown.json
 *.njsproj
 *.sln
 *.sw?
+prompt.txt

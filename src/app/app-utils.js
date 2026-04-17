@@ -11,10 +11,25 @@ export function normalizeRegionBaseUrl(value) {
   return String(value ?? "").trim().replace(/\/+$/, "");
 }
 
+export function normalizeExternalHttpUrl(value) {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) {
+    return "";
+  }
+
+  try {
+    const url = new URL(normalized);
+    return ["http:", "https:"].includes(url.protocol) ? url.toString() : "";
+  } catch (_) {
+    return "";
+  }
+}
+
 export function getDefaultGatewayConfig() {
   return {
     desktopApp: false,
     hostedDeployment: false,
+    featureSuggestionUrl: "",
   };
 }
 
@@ -29,6 +44,7 @@ export function getDefaultAppConfig() {
     cooldownHours: 4,
     cooldownUntil: 0,
     desktopAppUrl: "",
+    featureSuggestionUrl: "",
     frontendVersion: typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "0.0.0",
     backendVersion: "0.0.0",
     versionMismatch: false,
@@ -54,6 +70,7 @@ export function mergeAppConfig(currentConfig, config = {}) {
     cooldownHours: Number(config.cooldownHours ?? defaults.cooldownHours) || defaults.cooldownHours,
     cooldownUntil: Number(config.cooldownUntil ?? 0) || 0,
     desktopAppUrl: String(config.desktopAppUrl || "").trim(),
+    featureSuggestionUrl: normalizeExternalHttpUrl(config.featureSuggestionUrl),
     frontendVersion,
     backendVersion,
     versionMismatch:
@@ -181,11 +198,13 @@ export function extractResponseItems(data) {
 export function collectSelectedEpisodesFromDramas(dramas = []) {
   const selectedEpisodes = [];
   dramas.forEach((drama) => {
+    const dramaId = String(drama?.drama?.id ?? "").trim();
     const dramaTitle = drama?.drama?.name || "";
     const episodes = Array.isArray(drama?.episodes?.episode) ? drama.episodes.episode : [];
     episodes.forEach((episode) => {
       if (episode.selected) {
         selectedEpisodes.push({
+          drama_id: dramaId,
           sound_id: episode.sound_id,
           drama_title: dramaTitle,
           episode_title: episode.name,

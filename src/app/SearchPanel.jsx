@@ -329,9 +329,9 @@ export function SearchPanel({
               <ChevronDownIcon className={isManualOpen ? "rotate-180 transition-transform" : "transition-transform"} />
             </Button>
           </div>
-          <div className="flex flex-col gap-3 sm:flex-row">
+          <div className="flex items-center gap-2 sm:gap-3">
             <Input
-              className="h-11 border-border/80 bg-background focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-ring/40"
+              className="h-11 min-w-0 flex-1 border-border/80 bg-background focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-ring/40"
               placeholder={
                 platform === "missevan"
                   ? "输入作品名、CV、角色名、原作名或关键词"
@@ -341,7 +341,7 @@ export function SearchPanel({
               onChange={(event) => setKeyword(event.target.value)}
               onKeyDown={(event) => event.key === "Enter" && search()}
             />
-            <Button className="h-11 px-5" disabled={isSearchPending} onClick={search}>
+            <Button className="h-11 shrink-0 px-4 sm:px-5" disabled={isSearchPending} onClick={search}>
               <SearchIcon data-icon="inline-start" />
               {isSearchPending ? "搜索中" : "搜索"}
             </Button>
@@ -350,19 +350,19 @@ export function SearchPanel({
 
         <div className={`${isManualOpen ? "flex" : "hidden"} min-w-0 flex-col gap-3 lg:flex`}>
           <div className="hidden text-base font-semibold text-foreground lg:block">手动导入</div>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+          <div className="flex items-stretch gap-2 sm:gap-3">
             <Textarea
-              className="min-h-20 flex-1 border-border/80 bg-background focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-ring/40 lg:min-h-24"
+              className="min-h-20 min-w-0 flex-1 border-border/80 bg-background focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-ring/40 lg:min-h-24"
               placeholder={manualPlaceholder}
               value={formState?.manualInput ?? ""}
               onChange={(event) => setManualInput(event.target.value)}
             />
-            <div className="grid grid-cols-2 gap-3 sm:w-auto sm:min-w-[7rem] sm:grid-cols-1">
-              <Button className="h-11 px-5" disabled={isManualPending} onClick={queryManualInput}>
+            <div className="grid w-fit shrink-0 grid-cols-1 gap-2 sm:min-w-[7rem] sm:gap-3">
+              <Button className="h-11 px-3 sm:px-5" disabled={isManualPending} onClick={queryManualInput}>
                 <UploadIcon data-icon="inline-start" />
                 {isManualPending ? "导入中" : "导入"}
               </Button>
-              <Button variant="secondary" className="h-11 px-5" onClick={clearManualInput}>
+              <Button variant="secondary" className="h-11 px-3 sm:px-5" onClick={clearManualInput}>
                 <Trash2Icon data-icon="inline-start" />
                 清空
               </Button>

@@ -247,14 +247,14 @@ export function createManboIndexStore({
     async ensureLoaded() {
       await ensureLoaded(false);
     },
-    async search(keyword, limit = 30) {
+    async search(keyword, limit = null) {
       await ensureLoaded(false);
       const rawKeyword = normalizeWhitespace(keyword);
       const normalizedKeyword = normalizeManboIndexName(rawKeyword);
       if (!rawKeyword || (!normalizedKeyword && !/^\d+$/.test(rawKeyword))) {
         return [];
       }
-      return Array.from(state.records.values())
+      const matchedRecords = Array.from(state.records.values())
         .map((record) => ({
           record,
           score: scoreRecord(record, rawKeyword, normalizedKeyword),
@@ -266,8 +266,11 @@ export function createManboIndexStore({
           }
           return a.record.name.localeCompare(b.record.name, "zh-Hans-CN");
         })
-        .slice(0, Math.max(1, Number(limit) || 30))
         .map(({ record }) => ({ ...record }));
+      const normalizedLimit = Number(limit);
+      return Number.isFinite(normalizedLimit) && normalizedLimit > 0
+        ? matchedRecords.slice(0, Math.floor(normalizedLimit))
+        : matchedRecords;
     },
     async upsert(record) {
       await ensureLoaded(false);

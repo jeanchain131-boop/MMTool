@@ -1,5 +1,22 @@
 import { useState } from "react";
-import { ChevronDownIcon, ChevronRightIcon, ChevronUpIcon, CoinsIcon, ListChecksIcon, PlayCircleIcon, RadioTowerIcon } from "lucide-react";
+import {
+  BeanIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  ChevronUpIcon,
+  ChevronsLeftIcon,
+  ChevronsRightIcon,
+  CoinsIcon,
+  GemIcon,
+  HeartIcon,
+  ListChecksIcon,
+  PlayCircleIcon,
+  RadioTowerIcon,
+  ShoppingCartIcon,
+  StarIcon,
+  StepBackIcon,
+  StepForwardIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -18,11 +35,13 @@ function buildProxyImageUrl(url) {
 function collectSelectedEpisodes(dramas = []) {
   const selectedEpisodes = [];
   dramas.forEach((drama) => {
+    const dramaId = String(drama?.drama?.id ?? "").trim();
     const dramaTitle = drama?.drama?.name || "";
     const episodes = Array.isArray(drama?.episodes?.episode) ? drama.episodes.episode : [];
     episodes.forEach((episode) => {
       if (episode.selected) {
         selectedEpisodes.push({
+          drama_id: dramaId,
           sound_id: episode.sound_id,
           drama_title: dramaTitle,
           episode_title: episode.name,
@@ -34,26 +53,50 @@ function collectSelectedEpisodes(dramas = []) {
   return selectedEpisodes;
 }
 
-function buildPaginationItems(currentPage, totalPages) {
-  const safeTotal = Math.max(1, Number(totalPages) || 1);
-  const safeCurrent = Math.min(safeTotal, Math.max(1, Number(currentPage) || 1));
-  if (safeTotal <= 7) {
-    return Array.from({ length: safeTotal }, (_, index) => index + 1);
-  }
+const metricLegendItems = [
+  { label: "播放", icon: PlayCircleIcon },
+  { label: "追剧", icon: HeartIcon },
+  { label: "收藏", icon: StarIcon },
+  { label: "打赏人数", icon: GemIcon },
+  { label: "投喂", icon: BeanIcon },
+  { label: "付费/收听", icon: ShoppingCartIcon },
+];
 
-  const pages = new Set([1, safeTotal, safeCurrent - 1, safeCurrent, safeCurrent + 1]);
-  const sortedPages = Array.from(pages)
-    .filter((page) => page >= 1 && page <= safeTotal)
-    .sort((left, right) => left - right);
-  const items = [];
-  sortedPages.forEach((page) => {
-    const previous = items[items.length - 1];
-    if (typeof previous === "number" && page - previous > 1) {
-      items.push(`ellipsis-${previous}-${page}`);
-    }
-    items.push(page);
-  });
-  return items;
+const metricIconMap = {
+  总播放量: PlayCircleIcon,
+  追剧人数: HeartIcon,
+  收藏人数: StarIcon,
+  收藏数: StarIcon,
+  打赏人数: GemIcon,
+  投喂总数: BeanIcon,
+  付费人数: ShoppingCartIcon,
+  收听人数: ShoppingCartIcon,
+};
+
+function MetricIcon({ label, className = "size-3.5" }) {
+  const Icon = metricIconMap[label] || PlayCircleIcon;
+  return <Icon aria-hidden="true" className={className} />;
+}
+
+function MetricLegend({ className = "" }) {
+  return (
+    <div
+      className={`rounded-lg border border-border/75 bg-card/96 px-3 py-2 shadow-[0_18px_38px_-34px_rgba(15,23,42,0.28)] ${className}`}
+      aria-label="统计图标图例"
+    >
+      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[0.68rem] leading-5 text-muted-foreground">
+        {metricLegendItems.map((item) => {
+          const Icon = item.icon;
+          return (
+            <span key={item.label} className="inline-flex min-w-fit items-center gap-1">
+              <Icon aria-hidden="true" className="size-3.5 text-foreground/74" />
+              <span>{item.label}</span>
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 export function SearchResults({
@@ -86,9 +129,19 @@ export function SearchResults({
   const visibleResults = results;
   const totalPages = resultSource === "search" ? Math.max(1, Math.ceil(Number(totalResults || results.length) / Math.max(1, Number(pageSize || 5)))) : 1;
   const showPagination = resultSource === "search" && totalPages > 1;
-  const paginationItems = buildPaginationItems(currentPage, totalPages);
+  const safeCurrentPage = Math.min(totalPages, Math.max(1, Number(currentPage) || 1));
   const selectedDramaIdSet = new Set(actionResults.filter((result) => result.checked).map((result) => String(result.id)));
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
+  const isFirstPage = safeCurrentPage <= 1;
+  const isLastPage = safeCurrentPage >= totalPages;
+
+  function goToPage(page) {
+    const safeTargetPage = Math.min(totalPages, Math.max(1, Number(page) || 1));
+    if (isLoadingMoreResults || safeTargetPage === safeCurrentPage) {
+      return;
+    }
+    onLoadSearchPage?.(safeTargetPage);
+  }
 
   function getTitleClassName(title) {
     const length = String(title ?? "").trim().length;
@@ -323,15 +376,6 @@ export function SearchResults({
     return isPaidEpisode(platform, episode) ? "付费" : "";
   }
 
-  function getMetricToneClass(index) {
-    const variants = [
-      "border-border/80 bg-background text-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.62),0_8px_18px_-16px_rgba(15,23,42,0.18)]",
-      "border-secondary/20 bg-secondary text-secondary-foreground",
-      "border-primary/20 bg-primary text-primary-foreground",
-    ];
-    return variants[index % variants.length];
-  }
-
   const actionButtonBaseClass = "h-9 w-full justify-start px-2.5 text-xs";
   const mobileActionButtonClass = "h-9 min-w-0 gap-1 px-1.5 text-[0.64rem] sm:px-2 sm:text-xs";
 
@@ -372,7 +416,7 @@ export function SearchResults({
               导入分集
             </Button>
           </div>
-          <div className={`grid gap-2 ${platform !== "manbo" ? "grid-cols-3" : "grid-cols-2"}`}>
+          <div className="grid gap-2 grid-cols-3">
             <Button
               variant="secondary"
               className={mobileActionButtonClass}
@@ -381,16 +425,14 @@ export function SearchResults({
               <CoinsIcon data-icon="inline-start" />
               收益预估
             </Button>
-            {platform !== "manbo" ? (
-              <Button
-                variant="secondary"
-                className={mobileActionButtonClass}
-                onClick={() => runMobileAction(() => onStartPlayCountStatistics?.(getSelectedEpisodeIds()))}
-              >
-                <PlayCircleIcon data-icon="inline-start" />
-                统计播放量
-              </Button>
-            ) : null}
+            <Button
+              variant="secondary"
+              className={mobileActionButtonClass}
+              onClick={() => runMobileAction(() => onStartPlayCountStatistics?.(getSelectedEpisodeIds()))}
+            >
+              <PlayCircleIcon data-icon="inline-start" />
+              统计播放量
+            </Button>
             <Button
               variant="secondary"
               className={mobileActionButtonClass}
@@ -465,19 +507,17 @@ export function SearchResults({
             <CoinsIcon data-icon="inline-start" />
             收益预估
           </Button>
-          {platform !== "manbo" ? (
-            <Button
-              variant="secondary"
-              className={actionButtonBaseClass}
-              onClick={() => {
-                setMobileActionsOpen(false);
-                onStartPlayCountStatistics?.(getSelectedEpisodeIds());
-              }}
-            >
-              <PlayCircleIcon data-icon="inline-start" />
-              统计播放量
-            </Button>
-          ) : null}
+          <Button
+            variant="secondary"
+            className={actionButtonBaseClass}
+            onClick={() => {
+              setMobileActionsOpen(false);
+              onStartPlayCountStatistics?.(getSelectedEpisodeIds());
+            }}
+          >
+            <PlayCircleIcon data-icon="inline-start" />
+            统计播放量
+          </Button>
           <Button
             variant="secondary"
             className={actionButtonBaseClass}
@@ -496,6 +536,7 @@ export function SearchResults({
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_11rem] lg:items-start">
+      {results.length ? <MetricLegend className="lg:hidden" /> : null}
       <Card className="min-w-0 border-border/80 bg-card shadow-[0_24px_52px_-42px_rgba(15,23,42,0.24)]">
         <CardContent className="pt-5">
         {results.length ? (
@@ -529,7 +570,12 @@ export function SearchResults({
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-start justify-between gap-2">
-                            <div className={`min-w-0 break-words ${getTitleClassName(item.name)}`}>{item.name}</div>
+                            <div className="min-w-0">
+                              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                                <span className={`min-w-0 break-words ${getTitleClassName(item.name)}`}>{item.name}</span>
+                                {item.is_member ? <Badge variant="info" className="shrink-0">会员</Badge> : null}
+                              </div>
+                            </div>
                             {importedDrama ? <Badge variant="coral" className="shrink-0">已导入分集</Badge> : null}
                           </div>
                           <div className="mt-1 text-xs text-muted-foreground">
@@ -540,9 +586,6 @@ export function SearchResults({
                               {mainCvText}
                             </div>
                           ) : null}
-                          <div className="mt-2 flex flex-wrap gap-1.5">
-                            {item.is_member ? <Badge variant="info">会员</Badge> : null}
-                          </div>
                         </div>
                       </div>
 
@@ -572,7 +615,7 @@ export function SearchResults({
                       ) : null}
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <div className="grid grid-cols-4 gap-x-2 gap-y-1 text-sm sm:flex sm:flex-wrap sm:items-center sm:gap-x-3 sm:gap-y-1.5">
                       {[
                         {
                           label: "总播放量",
@@ -590,6 +633,12 @@ export function SearchResults({
                               value: formatPlainNumber(item.pay_count),
                             }
                           : null,
+                        platform === "manbo" && item?.is_member && Number.isFinite(Number(item?.member_listen_count)) && Number(item.member_listen_count) > 0
+                          ? {
+                              label: "收听人数",
+                              value: formatPlainNumber(item.member_listen_count),
+                            }
+                          : null,
                         platform === "missevan" && item?.reward_num != null && Number.isFinite(Number(item.reward_num))
                           ? {
                               label: "打赏人数",
@@ -604,13 +653,17 @@ export function SearchResults({
                           : null,
                       ]
                         .filter(Boolean)
-                        .map((metric, index) => (
+                        .map((metric) => (
                           <div
                             key={`${item.id}-${metric.label}`}
-                            className={`min-w-fit rounded-[calc(var(--radius)-0.12rem)] border px-3 py-1.5 ${getMetricToneClass(index)}`}
+                            aria-label={`${metric.label}: ${metric.value}`}
+                            title={`${metric.label}: ${metric.value}`}
+                            className="min-w-0 text-foreground"
                           >
-                            <span className="opacity-78">{metric.label}: </span>
-                            <span className="font-medium">{metric.value}</span>
+                            <span className="flex min-w-0 items-center justify-center gap-1 sm:justify-start">
+                              <MetricIcon label={metric.label} className="size-3.5 shrink-0 text-muted-foreground" />
+                              <span className="min-w-0 text-[0.74rem] font-medium tabular-nums sm:text-sm">{metric.value}</span>
+                            </span>
                           </div>
                         ))}
                     </div>
@@ -657,25 +710,59 @@ export function SearchResults({
               );
             })}
             {showPagination ? (
-              <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
-                {paginationItems.map((item) =>
-                  typeof item === "number" ? (
-                    <Button
-                      key={`search-page-${item}`}
-                      variant={item === currentPage ? "default" : "outline"}
-                      size="sm"
-                      className="min-w-9 px-2"
-                      disabled={isLoadingMoreResults}
-                      onClick={() => onLoadSearchPage?.(item)}
-                    >
-                      {item}
-                    </Button>
-                  ) : (
-                    <span key={item} className="px-1 text-sm text-muted-foreground">
-                      ...
-                    </span>
-                  )
-                )}
+              <div className="flex flex-wrap items-center justify-center gap-1.5 pt-1 text-sm">
+                <Button
+                  aria-label="跳到第一页"
+                  variant="outline"
+                  size="icon-sm"
+                  disabled={isLoadingMoreResults || isFirstPage}
+                  onClick={() => goToPage(1)}
+                >
+                  <StepBackIcon />
+                </Button>
+                <Button
+                  aria-label="跳到上一页"
+                  variant="outline"
+                  size="icon-sm"
+                  disabled={isLoadingMoreResults || isFirstPage}
+                  onClick={() => goToPage(safeCurrentPage - 1)}
+                >
+                  <ChevronsLeftIcon />
+                </Button>
+                <label className="sr-only" htmlFor="search-result-page-select">
+                  选择搜索结果页码
+                </label>
+                <select
+                  id="search-result-page-select"
+                  className="h-8 min-w-24 rounded-[calc(var(--radius)-0.12rem)] border border-input bg-background px-2 text-sm text-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.35)] outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={isLoadingMoreResults}
+                  value={safeCurrentPage}
+                  onChange={(event) => goToPage(Number(event.target.value) || 1)}
+                >
+                  {Array.from({ length: totalPages }, (_, index) => index + 1).map((page) => (
+                    <option key={`search-page-option-${page}`} value={page}>
+                      第 {page} 页
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  aria-label="跳到下一页"
+                  variant="outline"
+                  size="icon-sm"
+                  disabled={isLoadingMoreResults || isLastPage}
+                  onClick={() => goToPage(safeCurrentPage + 1)}
+                >
+                  <ChevronsRightIcon />
+                </Button>
+                <Button
+                  aria-label="跳到最后一页"
+                  variant="outline"
+                  size="icon-sm"
+                  disabled={isLoadingMoreResults || isLastPage}
+                  onClick={() => goToPage(totalPages)}
+                >
+                  <StepForwardIcon />
+                </Button>
                 {isLoadingMoreResults ? (
                   <span className="text-xs text-muted-foreground">加载中</span>
                 ) : null}
@@ -696,9 +783,12 @@ export function SearchResults({
       </Card>
       {results.length ? (
         <aside className="hidden lg:sticky lg:top-36 lg:block">
-          <div className="rounded-lg border border-border/80 bg-card p-3 shadow-[0_20px_46px_-38px_rgba(15,23,42,0.32)]">
-            <div className="mb-3 text-xs font-semibold text-muted-foreground">批量操作</div>
-            <ActionPanel />
+          <div className="grid gap-3">
+            <MetricLegend />
+            <div className="rounded-lg border border-border/80 bg-card p-3 shadow-[0_20px_46px_-38px_rgba(15,23,42,0.32)]">
+              <div className="mb-3 text-xs font-semibold text-muted-foreground">批量操作</div>
+              <ActionPanel />
+            </div>
           </div>
         </aside>
       ) : null}

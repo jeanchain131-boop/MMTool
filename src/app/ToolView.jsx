@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangleIcon } from "lucide-react";
+import { AlertTriangleIcon, MessageSquarePlusIcon } from "lucide-react";
 import { toast } from "sonner";
 
 import { DesktopReportPanel } from "@/app/DesktopReportPanel";
@@ -28,6 +28,7 @@ import {
 } from "@/app/app-utils";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export function ToolView({ initialAppConfig }) {
@@ -580,7 +581,11 @@ export function ToolView({ initialAppConfig }) {
             ? Array.isArray(result.suspectedOverflowEpisodes)
               ? result.suspectedOverflowEpisodes
               : []
-            : state.stats.suspectedOverflowEpisodes,
+            : Array.isArray(result.revenueResults)
+              ? Array.isArray(result.revenueSummary?.suspectedOverflowEpisodes)
+                ? result.revenueSummary.suspectedOverflowEpisodes
+                : []
+              : state.stats.suspectedOverflowEpisodes,
           idSelectedEpisodeCount: Array.isArray(result.idResults)
             ? Number(result.idSelectedEpisodeCount ?? state.stats.idSelectedEpisodeCount ?? 0)
             : state.stats.idSelectedEpisodeCount,
@@ -734,6 +739,30 @@ export function ToolView({ initialAppConfig }) {
     };
   }
 
+  async function registerFallbackMissevanDramaIds(platform, ids) {
+    if (platform !== "missevan") {
+      return;
+    }
+
+    const fallbackIds = getSearchResultsByIds(platform, ids)
+      .filter((item) => item?.search_source === "missevan_api")
+      .map((item) => item.id);
+    if (!fallbackIds.length) {
+      return;
+    }
+
+    try {
+      await postJson(
+        "/register-new-drama-ids",
+        { platform: "missevan", drama_ids: fallbackIds },
+        undefined,
+        "Failed to register new drama ids"
+      );
+    } catch (error) {
+      console.error("Failed to register fallback Missevan drama ids", error);
+    }
+  }
+
   async function addDramas(ids) {
     const platform = currentPlatformRef.current;
     if (!ids?.length) {
@@ -746,23 +775,7 @@ export function ToolView({ initialAppConfig }) {
     const mergedDramas = [...currentState.dramas];
 
     try {
-      if (platform === "missevan") {
-        const fallbackIds = getSearchResultsByIds(platform, ids)
-          .filter((item) => item?.search_source === "missevan_api")
-          .map((item) => item.id);
-        if (fallbackIds.length) {
-          try {
-            await postJson(
-              "/register-new-drama-ids",
-              { platform: "missevan", drama_ids: fallbackIds },
-              undefined,
-              "Failed to register new drama ids"
-            );
-          } catch (error) {
-            console.error("Failed to register fallback Missevan drama ids", error);
-          }
-        }
-      }
+      await registerFallbackMissevanDramaIds(platform, ids);
 
       for (let index = 0; index < ids.length; index += 1) {
         const id = String(ids[index]);
@@ -898,6 +911,7 @@ export function ToolView({ initialAppConfig }) {
     }));
     scrollToPanel(outputPanelRef);
     try {
+      await registerFallbackMissevanDramaIds(platform, dramaIds);
       await startStatsTask(platform, "revenue", { dramaIds }, runId, signal);
       scrollToPanel(outputPanelRef);
     } catch (error) {
@@ -948,15 +962,25 @@ export function ToolView({ initialAppConfig }) {
                 <p className="line-clamp-2 max-w-3xl text-xs leading-5 text-muted-foreground sm:text-sm">{appConfig.description}</p>
               </div>
             </div>
-            <Tabs value={currentPlatform} onValueChange={setCurrentPlatform}>
-              <TabsList className="inline-flex w-full justify-start overflow-x-auto sm:w-fit">
-                {visiblePlatforms.map((platform) => (
-                  <TabsTrigger key={platform.key} className="px-3" value={platform.key}>
-                    {platform.label}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-            </Tabs>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+              {appConfig.featureSuggestionUrl ? (
+                <Button variant="outline" size="sm" asChild>
+                  <a href={appConfig.featureSuggestionUrl} rel="noreferrer" target="_blank">
+                    <MessageSquarePlusIcon data-icon="inline-start" />
+                    功能建议
+                  </a>
+                </Button>
+              ) : null}
+              <Tabs value={currentPlatform} onValueChange={setCurrentPlatform}>
+                <TabsList className="inline-flex w-full justify-start overflow-x-auto sm:w-fit">
+                  {visiblePlatforms.map((platform) => (
+                    <TabsTrigger key={platform.key} className="px-3" value={platform.key}>
+                      {platform.label}
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+              </Tabs>
+            </div>
           </div>
 
           {appConfig.versionMismatch ? (
