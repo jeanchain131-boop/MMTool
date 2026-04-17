@@ -18,10 +18,12 @@ const require = createRequire(import.meta.url);
 const packageJson = require("./package.json");
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const desktopPackagedApp = process.env.DESKTOP_PACKAGED_APP === "true";
 await loadLocalEnv({
   desktopApp: process.env.DESKTOP_APP === "true",
-  projectRoot: __dirname,
+  projectRoot: desktopPackagedApp ? "" : __dirname,
   appDataDir: process.env.APP_DATA_DIR || "",
+  exeDir: process.env.DESKTOP_EXE_DIR || "",
 });
 
 const app = express();

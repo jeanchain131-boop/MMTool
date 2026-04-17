@@ -181,11 +181,13 @@ async function startEmbeddedServer() {
   process.env.START_SERVER_ON_IMPORT = "false";
   process.env.APP_DATA_DIR = app.getPath("userData");
   process.env.DESKTOP_APP = "true";
+  process.env.DESKTOP_PACKAGED_APP = app.isPackaged ? "true" : "false";
+  process.env.DESKTOP_EXE_DIR = process.env.PORTABLE_EXECUTABLE_DIR || path.dirname(app.getPath("exe"));
   await loadLocalEnv({
     desktopApp: true,
-    projectRoot,
+    projectRoot: app.isPackaged ? "" : projectRoot,
     appDataDir: process.env.APP_DATA_DIR,
-    exeDir: path.dirname(app.getPath("exe")),
+    exeDir: process.env.DESKTOP_EXE_DIR,
   });
 
   const serverModule = await import(pathToFileURL(path.join(projectRoot, "server.js")).href);
@@ -214,7 +216,7 @@ async function createMainWindow() {
 
   try {
     await startEmbeddedServer();
-    await mainWindow.loadURL(desktopUrl);
+    await mainWindow.loadURL(`${desktopUrl}/tool`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await mainWindow.loadURL(
