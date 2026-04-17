@@ -1,7 +1,3 @@
-export function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 export function normalizeVersion(value) {
   const normalized = String(value ?? "").trim();
   return /^\d+\.\d+\.\d+$/.test(normalized) ? normalized : "0.0.0";
@@ -11,7 +7,7 @@ export function normalizeRegionBaseUrl(value) {
   return String(value ?? "").trim().replace(/\/+$/, "");
 }
 
-export function normalizeExternalHttpUrl(value) {
+function normalizeExternalHttpUrl(value) {
   const normalized = String(value ?? "").trim();
   if (!normalized) {
     return "";
@@ -233,7 +229,7 @@ export function buildUniqueUserIds(collections) {
   return Array.from(userSet);
 }
 
-export function hasRevenueRange(result) {
+function hasRevenueRange(result) {
   if (!result || result.summaryRevenueMode === "single" || result.summaryRevenueMode === "member_reward") {
     return false;
   }
@@ -327,11 +323,11 @@ export function getSummaryRevenueTotals(results, platform) {
   };
 }
 
-export function getRevenueCurrencyUnit(platform) {
+function getRevenueCurrencyUnit(platform) {
   return platform === "manbo" ? "红豆" : "钻石";
 }
 
-export function buildRevenueSummaryTitle(summary) {
+function buildRevenueSummaryTitle(summary) {
   const baseTitle = `汇总 / 已选 ${summary.selectedDramaCount} 部`;
   if (!summary || summary.failed || !summary.hasSummaryPrice) {
     return baseTitle;
@@ -421,7 +417,7 @@ export function buildRevenueSummary(results, currentPlatform) {
   return summary;
 }
 
-export function formatPlayCount(value) {
+function formatPlayCount(value) {
   const count = Number(value ?? 0);
   if (!Number.isFinite(count) || count <= 0) {
     return "0";
@@ -455,12 +451,12 @@ export function formatPlayCountWanFixed(value) {
   return `${(count / 10000).toFixed(1)}万`;
 }
 
-export function formatRewardValue(platform, value) {
+function formatRewardValue(platform, value) {
   const amount = Number(value ?? 0);
   return platform === "manbo" ? `${amount} 红豆` : `${amount} 钻石`;
 }
 
-export function formatRevenue(value) {
+function formatRevenue(value) {
   const amount = Number(value ?? 0);
   if (!Number.isFinite(amount) || amount <= 0) {
     return "0 元";
@@ -477,7 +473,7 @@ export function formatRevenue(value) {
   return `${amount.toFixed(2).replace(/\.?0+$/, "")} 元`;
 }
 
-export function formatRevenueRange(minValue, maxValue) {
+function formatRevenueRange(minValue, maxValue) {
   return `${formatRevenue(minValue)} - ${formatRevenue(maxValue)}`;
 }
 

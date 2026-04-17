@@ -56,7 +56,7 @@ export function isMainEpisode(platform, episode) {
   );
 }
 
-export function getMissevanDanmakuCapByDurationMs(durationMs) {
+function getMissevanDanmakuCapByDurationMs(durationMs) {
   const normalizedDuration = Number(durationMs ?? 0);
   if (!Number.isFinite(normalizedDuration) || normalizedDuration <= 0) {
     return 0;

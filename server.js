@@ -1104,6 +1104,7 @@ function buildMissevanRankCard(rankKey, item, index, dramas) {
   }
 
   const mainCvs = normalizeStringArray(drama.maincvs, 20);
+  const isNewRank = rankKey === "new_daily" || rankKey === "new_weekly";
   return {
     rank: index + 1,
     id: Number(dramaId),
@@ -1119,6 +1120,7 @@ function buildMissevanRankCard(rankKey, item, index, dramas) {
     main_cv_text: buildRankMainCvText(mainCvs),
     platform: "missevan",
     type: "drama",
+    ...(isNewRank ? { danmaku_uid_count: normalizeRankNumber(drama.danmaku_uid_count) } : {}),
   };
 }
 

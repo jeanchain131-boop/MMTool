@@ -102,5 +102,3 @@ export async function loadLocalEnv(options = {}) {
     });
   }
 }
-
-export { SUPPORTED_ENV_KEYS };

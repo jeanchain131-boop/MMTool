@@ -4,6 +4,7 @@ import {
   CoinsIcon,
   GemIcon,
   HeartIcon,
+  MessageCircleIcon,
   PlayCircleIcon,
   RefreshCwIcon,
   ShoppingCartIcon,
@@ -99,6 +100,7 @@ const metricLegendItems = [
   { label: "收藏", icon: StarIcon },
   { label: "打赏人数", icon: GemIcon },
   { label: "打赏榜总和", icon: CoinsIcon },
+  { label: "付费集弹幕ID数", icon: MessageCircleIcon },
   { label: "投喂", icon: BeanIcon },
   { label: "购买人数/收听人数", icon: ShoppingCartIcon },
   { label: "排行值", icon: TrophyIcon },
@@ -110,6 +112,7 @@ const metricIconMap = {
   收藏数: StarIcon,
   打赏人数: GemIcon,
   打赏榜总和: CoinsIcon,
+  付费集弹幕ID数: MessageCircleIcon,
   投喂总数: BeanIcon,
   "购买人数/收听人数": ShoppingCartIcon,
   排行值: TrophyIcon,
@@ -158,6 +161,9 @@ function getRankMetrics(platform, item) {
     }
     if (item.type !== "peak" && item.reward_total != null) {
       metrics.push({ label: "打赏榜总和", value: formatPlainNumber(item.reward_total) });
+    }
+    if (item.type !== "peak" && item.danmaku_uid_count != null) {
+      metrics.push({ label: "付费集弹幕ID数", value: formatPlainNumber(item.danmaku_uid_count) });
     }
     return metrics;
   }
