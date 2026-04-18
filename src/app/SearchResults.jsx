@@ -9,6 +9,7 @@ import {
   CoinsIcon,
   GemIcon,
   HeartIcon,
+  ImportIcon,
   ListChecksIcon,
   PlayCircleIcon,
   RadioTowerIcon,
@@ -54,6 +55,7 @@ function collectSelectedEpisodes(dramas = []) {
 }
 
 const metricLegendItems = [
+  { label: "导入分集", icon: ImportIcon },
   { label: "播放", icon: PlayCircleIcon },
   { label: "追剧", icon: HeartIcon },
   { label: "收藏", icon: StarIcon },
@@ -413,7 +415,7 @@ export function SearchResults({
               onClick={() => runMobileAction(() => onAddDramas?.(getSelectedDramaIds()))}
             >
               <ListChecksIcon data-icon="inline-start" />
-              导入分集
+              批量导入
             </Button>
           </div>
           <div className="grid gap-2 grid-cols-3">
@@ -494,7 +496,7 @@ export function SearchResults({
             }}
           >
             <ListChecksIcon data-icon="inline-start" />
-            导入分集
+            批量导入
           </Button>
           <Button
             variant="secondary"
@@ -557,7 +559,18 @@ export function SearchResults({
                             <Button variant="ghost" size="icon-sm" className="bg-background/84" onClick={() => toggleDrama(item.id)}>
                               {importedDrama.expanded ? <ChevronDownIcon /> : <ChevronRightIcon />}
                             </Button>
-                          ) : null}
+                          ) : (
+                            <Button
+                              aria-label="导入分集"
+                              title="导入分集"
+                              variant="ghost"
+                              size="icon-sm"
+                              className="bg-background/84"
+                              onClick={() => onAddDramas?.([item.id], { autoCheck: true, expandImported: true })}
+                            >
+                              <ImportIcon />
+                            </Button>
+                          )}
                         </div>
                         <div className="size-[4rem] shrink-0 self-start overflow-hidden rounded-[calc(var(--radius)-0.05rem)] border border-border/70 bg-muted/50">
                           {coverUrl ? (
@@ -615,7 +628,7 @@ export function SearchResults({
                       ) : null}
                     </div>
 
-                    <div className="grid grid-cols-4 gap-x-2 gap-y-1 text-sm sm:flex sm:flex-wrap sm:items-center sm:gap-x-3 sm:gap-y-1.5">
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 text-sm">
                       {[
                         {
                           label: "总播放量",
@@ -658,11 +671,11 @@ export function SearchResults({
                             key={`${item.id}-${metric.label}`}
                             aria-label={`${metric.label}: ${metric.value}`}
                             title={`${metric.label}: ${metric.value}`}
-                            className="min-w-0 text-foreground"
+                            className="max-w-full text-foreground"
                           >
-                            <span className="flex min-w-0 items-center justify-center gap-1 sm:justify-start">
+                            <span className="inline-flex w-fit max-w-full items-center gap-1">
                               <MetricIcon label={metric.label} className="size-3.5 shrink-0 text-muted-foreground" />
-                              <span className="min-w-0 text-[0.74rem] font-medium tabular-nums sm:text-sm">{metric.value}</span>
+                              <span className="min-w-0 break-all text-[0.74rem] font-medium tabular-nums sm:text-sm">{metric.value}</span>
                             </span>
                           </div>
                         ))}
@@ -684,18 +697,16 @@ export function SearchResults({
                                   onCheckedChange={(checked) => updateEpisodeChecked(item.id, episode.sound_id, Boolean(checked))}
                                 />
                                 <div className="min-w-0 flex-1">
-                                  <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
-                                    <div className="min-w-0 text-sm font-medium leading-5 sm:flex sm:flex-wrap sm:items-center sm:gap-2">
+                                  <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium leading-5">
                                       <span className="break-words">{episode.name}</span>
+                                      {getEpisodeTagText(episode) ? (
+                                        <Badge variant={isMemberEpisode(platform, episode) ? "info" : "coral"} className="shrink-0">
+                                          {getEpisodeTagText(episode)}
+                                        </Badge>
+                                      ) : null}
                                       <span className="text-xs font-normal text-muted-foreground sm:text-[0.82rem]">
                                         {episodeIdLabel}: {episode.sound_id}
                                       </span>
-                                    </div>
-                                    {getEpisodeTagText(episode) ? (
-                                      <Badge variant={isMemberEpisode(platform, episode) ? "info" : "coral"} className="shrink-0">
-                                        {getEpisodeTagText(episode)}
-                                      </Badge>
-                                    ) : null}
                                   </div>
                                 </div>
                               </label>

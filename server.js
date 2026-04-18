@@ -2783,7 +2783,7 @@ async function fetchDanmakuSummary(soundId, dramaTitle, episodeTitle = "") {
       userCount: Array.isArray(cached.users) ? cached.users.length : 0,
       accessDenied: Boolean(cached.accessDenied),
       cached: true,
-      error: cached.error || "",
+      ...(cached.error ? { error: cached.error } : {}),
     });
     return {
       ...cached,
@@ -2833,7 +2833,6 @@ async function fetchDanmakuSummary(soundId, dramaTitle, episodeTitle = "") {
       userCount: users.size,
       accessDenied: false,
       cached: false,
-      error: "",
     });
 
     return {
@@ -3580,7 +3579,7 @@ async function fetchManboDanmakuSummary(setId, dramaTitle, episodeTitle = "") {
       userCount: Array.isArray(cached.users) ? cached.users.length : 0,
       accessDenied: Boolean(cached.accessDenied),
       cached: true,
-      error: cached.error || "",
+      ...(cached.error ? { error: cached.error } : {}),
     });
     return {
       ...cached,
@@ -3675,7 +3674,6 @@ async function fetchManboDanmakuSummary(setId, dramaTitle, episodeTitle = "") {
         userCount: users.size,
         accessDenied: false,
         cached: false,
-        error: "",
         pageConcurrency: MANBO_DANMAKU_PAGE_CONCURRENCY,
         totalPages,
         durationMs: Date.now() - startedAt,
@@ -5243,6 +5241,31 @@ app.post("/usage-log", async (req, res) => {
     const platform = String(payload.platform ?? "").trim();
     const action = String(payload.action ?? "").trim();
     const error = String(payload.error ?? "").trim();
+
+    if (action === "ranks") {
+      if (!["missevan", "manbo"].includes(platform)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid usage log payload",
+        });
+      }
+
+      const keyword = normalizeKeyword(payload.keyword);
+      if (!keyword) {
+        return res.status(400).json({
+          success: false,
+          message: "Missing ranks keyword",
+        });
+      }
+
+      await writeUsageLog({
+        platform,
+        action,
+        keyword,
+        success: true,
+      });
+      return res.json({ success: true });
+    }
 
     if (
       platform !== "missevan" ||

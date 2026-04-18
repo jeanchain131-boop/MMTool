@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   BeanIcon,
   CoinsIcon,
@@ -144,7 +144,7 @@ function MetricLegend() {
   );
 }
 
-function getRankMetrics(platform, item) {
+function getRankMetrics(platform, item, rankKey = "") {
   const metrics = [
     {
       label: "总播放量",
@@ -177,7 +177,7 @@ function getRankMetrics(platform, item) {
   if (Number(item.pay_count) > 0) {
     metrics.push({ label: "购买人数/收听人数", value: formatPlainNumber(item.pay_count) });
   }
-  if (item.rank_value != null) {
+  if (item.rank_value != null && !(platform === "manbo" && rankKey === "peak")) {
     metrics.push({
       label: item.rank_value_label || "排行值",
       iconLabel: "排行值",
@@ -187,9 +187,9 @@ function getRankMetrics(platform, item) {
   return metrics;
 }
 
-function RankItemCard({ item, platform }) {
+function RankItemCard({ item, platform, rankKey = "" }) {
   const coverUrl = buildProxyImageUrl(item.cover);
-  const metrics = getRankMetrics(platform, item);
+  const metrics = getRankMetrics(platform, item, rankKey);
   const isMissevanPeak = platform === "missevan" && item.type === "peak";
   const dramaIdText = Array.isArray(item.drama_ids) && item.drama_ids.length ? item.drama_ids.join("，") : "";
   const recentUpdatedDate = isMissevanPeak ? "" : formatRankUpdatedDate(item.updated_at);
@@ -272,7 +272,7 @@ function RankColumn({ rank, platform }) {
       {rank.items.length ? (
         <div className="grid gap-3">
           {rank.items.map((item) => (
-            <RankItemCard key={`${rank.key}-${item.rank}-${item.id}`} item={item} platform={platform} />
+            <RankItemCard key={`${rank.key}-${item.rank}-${item.id}`} item={item} platform={platform} rankKey={rank.key} />
           ))}
         </div>
       ) : (
@@ -341,6 +341,7 @@ export function RanksPanel({ frontendVersion = "0.0.0", handleVersionResponse })
   const [selectedPlatform, setSelectedPlatform] = useState("missevan");
   const [selectedCategory, setSelectedCategory] = useState("");
   const [selectedRank, setSelectedRank] = useState("");
+  const loggedRanksRef = useRef(new Set());
 
   useEffect(() => {
     let cancelled = false;
@@ -420,6 +421,31 @@ export function RanksPanel({ frontendVersion = "0.0.0", handleVersionResponse })
     }
   }, [platformData, selectedCategory, selectedRank]);
 
+  useEffect(() => {
+    if (isLoading || errorMessage || !category?.key || !category?.label) {
+      return;
+    }
+
+    const logKey = `${selectedPlatform}:${category.key}`;
+    if (loggedRanksRef.current.has(logKey)) {
+      return;
+    }
+    loggedRanksRef.current.add(logKey);
+
+    fetch(buildVersionedUrl("/usage-log", frontendVersion), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        platform: selectedPlatform,
+        action: "ranks",
+        keyword: category.label,
+        success: true,
+      }),
+    }).catch((error) => {
+      console.error("Failed to log ranks view", error);
+    });
+  }, [category?.key, category?.label, errorMessage, frontendVersion, isLoading, selectedPlatform]);
+
   function updatePlatform(platform) {
     const nextPlatform = getPlatformData(rankData, platform);
     const nextCategory = getFirstCategory(nextPlatform);
@@ -439,7 +465,7 @@ export function RanksPanel({ frontendVersion = "0.0.0", handleVersionResponse })
   return (
     <div className="grid gap-4 sm:gap-5">
       <div className="px-1 text-sm leading-6 text-muted-foreground">
-        同步猫耳和漫播榜单，每日7:10刷新。此次榜单刷新于：{formatRankUpdatedAt(rankData?.updatedAt)}（北京时间）
+        同步猫耳和漫播榜单，每日更新。此次榜单刷新于：{formatRankUpdatedAt(rankData?.updatedAt)}（北京时间）
       </div>
 
       {isLoading ? (

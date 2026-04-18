@@ -765,16 +765,19 @@ export function ToolView({ initialAppConfig }) {
     }
   }
 
-  async function addDramas(ids) {
+  async function addDramas(ids, options = {}) {
     const platform = currentPlatformRef.current;
     if (!ids?.length) {
       toast.warning("请先选择作品。");
       return;
     }
+    const shouldAutoCheck = options?.autoCheck === true;
+    const shouldExpandImported = options?.expandImported === true;
     let hasAccessDenied = false;
     const currentState = platformStatesRef.current[platform];
     const existingDramaMap = new Map(currentState.dramas.map((drama) => [String(drama?.drama?.id), drama]));
     const mergedDramas = [...currentState.dramas];
+    const importedIdSet = new Set();
 
     try {
       await registerFallbackMissevanDramaIds(platform, ids);
@@ -782,14 +785,16 @@ export function ToolView({ initialAppConfig }) {
       for (let index = 0; index < ids.length; index += 1) {
         const id = String(ids[index]);
         if (existingDramaMap.has(id)) {
-          const existingDrama = existingDramaMap.get(id);
-          existingDrama.expanded = false;
           continue;
         }
         try {
-          const drama = await fetchDramaById(platform, id);
+          const drama = {
+            ...(await fetchDramaById(platform, id)),
+            expanded: shouldExpandImported,
+          };
           mergedDramas.push(drama);
           existingDramaMap.set(id, drama);
+          importedIdSet.add(id);
         } catch (error) {
           if (error?.accessDenied) {
             hasAccessDenied = true;
@@ -800,6 +805,25 @@ export function ToolView({ initialAppConfig }) {
 
       updatePlatformState(platform, (state) => ({
         ...state,
+        searchResults: shouldAutoCheck
+          ? state.searchResults.map((item) => ({
+              ...item,
+              checked: importedIdSet.has(String(item.id)) ? true : item.checked,
+            }))
+          : state.searchResults,
+        searchPageCache: shouldAutoCheck
+          ? Object.fromEntries(
+              Object.entries(state.searchPageCache || {}).map(([page, pageResults]) => [
+                page,
+                Array.isArray(pageResults)
+                  ? pageResults.map((item) => ({
+                      ...item,
+                      checked: importedIdSet.has(String(item.id)) ? true : item.checked,
+                    }))
+                  : pageResults,
+              ])
+            )
+          : state.searchPageCache,
         dramas: mergedDramas,
         selectedEpisodesSnapshot: collectSelectedEpisodesFromDramas(mergedDramas),
       }));
