@@ -138,6 +138,16 @@ const ranksCache = {
   loadedAt: 0,
   loadPromise: null,
 };
+const RANKS_RESPONSE_SCHEMA_VERSION = 2;
+
+function getFiniteNumberEnv(name, fallbackValue) {
+  const rawValue = process.env[name];
+  if (rawValue == null || rawValue === "") {
+    return fallbackValue;
+  }
+  const normalizedValue = Number(rawValue);
+  return Number.isFinite(normalizedValue) ? normalizedValue : fallbackValue;
+}
 
 const DRAMA_CACHE_TTL_MS = 30 * 60 * 1000;
 const SOUND_SUMMARY_CACHE_TTL_MS = 30 * 60 * 1000;
@@ -147,8 +157,23 @@ const MISSEVAN_SEARCH_API_CACHE_TTL_MS = 10 * 60 * 1000;
 const MANBO_DRAMA_CACHE_TTL_MS = 30 * 60 * 1000;
 const MANBO_SET_CACHE_TTL_MS = 30 * 60 * 1000;
 const MANBO_DANMAKU_CACHE_TTL_MS = 30 * 60 * 1000;
-const MANBO_STATS_TASK_TTL_MS = 60 * 60 * 1000;
+const DEFAULT_MANBO_STATS_TASK_TTL_MS = isHostedDeployment()
+  ? 15 * 60 * 1000
+  : 60 * 60 * 1000;
+const MANBO_STATS_TASK_TTL_MS = Math.max(
+  60 * 1000,
+  getFiniteNumberEnv("MANBO_STATS_TASK_TTL_MS", DEFAULT_MANBO_STATS_TASK_TTL_MS)
+);
 const MANBO_STATS_TASK_HEARTBEAT_TIMEOUT_MS = 5 * 60 * 1000;
+const MANBO_DANMAKU_CACHE_MAX_ENTRIES = Math.max(
+  0,
+  Math.floor(
+    getFiniteNumberEnv(
+      "MANBO_DANMAKU_CACHE_MAX_ENTRIES",
+      isHostedDeployment() ? 20 : 200
+    )
+  )
+);
 const RANKS_CACHE_TTL_MS = Math.max(
   60 * 1000,
   Number(process.env.RANKS_CACHE_TTL_MS ?? 30 * 60 * 1000) || 30 * 60 * 1000
@@ -647,11 +672,29 @@ function getCachedValue(cache, key, ttlMs) {
   return cached.value;
 }
 
-function setCachedValue(cache, key, value) {
-  cache.set(String(key), {
+function setCachedValue(cache, key, value, maxEntries = null) {
+  const cacheKey = String(key);
+  if (cache.has(cacheKey)) {
+    cache.delete(cacheKey);
+  }
+
+  cache.set(cacheKey, {
     value,
     createdAt: Date.now(),
   });
+
+  if (!Number.isFinite(Number(maxEntries))) {
+    return;
+  }
+
+  const normalizedMaxEntries = Math.max(0, Math.floor(Number(maxEntries)));
+  while (cache.size > normalizedMaxEntries) {
+    const oldestKey = cache.keys().next().value;
+    if (oldestKey == null) {
+      break;
+    }
+    cache.delete(oldestKey);
+  }
 }
 
 function normalizeKeyword(keyword) {
@@ -1072,6 +1115,31 @@ function buildRankMainCvText(mainCvs) {
   return names.length ? `主要CV：${names.join("，")}` : "";
 }
 
+function normalizeRankCatalogName(drama) {
+  const catalogName = normalizeTextValue(
+    drama?.catalogName ??
+      drama?.catalog_name ??
+      drama?.categoryName ??
+      drama?.category_name
+  );
+  if (catalogName === "有声书") {
+    return "有声剧";
+  }
+  return ["广播剧", "有声剧", "有声漫"].includes(catalogName) ? catalogName : "";
+}
+
+function getRankContentTypeLabel(drama) {
+  return normalizeRankCatalogName(drama);
+}
+
+function getRankPaymentLabel(drama) {
+  if (drama?.isVIP === true || drama?.is_member === true) {
+    return "会员";
+  }
+  const payStatus = normalizeTextValue(drama?.payStatus);
+  return ["付费", "免费"].includes(payStatus) ? payStatus : "";
+}
+
 function buildMissevanRankCard(rankKey, item, index, dramas) {
   if (rankKey === "peak") {
     const name = normalizeTextValue(item?.name);
@@ -1105,6 +1173,11 @@ function buildMissevanRankCard(rankKey, item, index, dramas) {
 
   const mainCvs = normalizeStringArray(drama.maincvs, 20);
   const isNewRank = rankKey === "new_daily" || rankKey === "new_weekly";
+  const rankCatalogName = normalizeRankCatalogName({
+    ...drama,
+    catalogName: normalizeTextValue(item?.catalogName) || drama.catalogName,
+  });
+
   return {
     rank: index + 1,
     id: Number(dramaId),
@@ -1116,6 +1189,16 @@ function buildMissevanRankCard(rankKey, item, index, dramas) {
     reward_total: normalizeRankNumber(drama.reward_total),
     updated_at: normalizeTextValue(drama.updated_at),
     is_member: drama.isVIP === true,
+    payment_label: getRankPaymentLabel({
+      ...drama,
+      isVIP: item?.isVIP ?? drama.isVIP,
+      payStatus: item?.payStatus ?? drama.payStatus,
+    }),
+    content_type_label: getRankContentTypeLabel({
+      ...drama,
+      catalogName: normalizeTextValue(item?.catalogName) || drama.catalogName,
+    }),
+    catalogName: rankCatalogName,
     main_cvs: mainCvs,
     main_cv_text: buildRankMainCvText(mainCvs),
     platform: "missevan",
@@ -1142,6 +1225,11 @@ function buildManboRankCard(rank, item, index, dramas) {
       : normalizeRankNumber(item?.hotValue);
   const mainCvs = normalizeStringArray(drama.maincvs, 20);
 
+  const rankCatalogName = normalizeRankCatalogName({
+    ...drama,
+    catalogName: normalizeTextValue(item?.catalogName) || drama.catalogName,
+  });
+
   return {
     rank: index + 1,
     id: dramaId,
@@ -1153,6 +1241,16 @@ function buildManboRankCard(rank, item, index, dramas) {
     diamond_value: normalizeRankNumber(drama.diamond_value),
     updated_at: normalizeTextValue(drama.updated_at),
     is_member: drama.isVIP === true,
+    payment_label: getRankPaymentLabel({
+      ...drama,
+      isVIP: item?.isVIP ?? drama.isVIP,
+      payStatus: item?.payStatus ?? drama.payStatus,
+    }),
+    content_type_label: getRankContentTypeLabel({
+      ...drama,
+      catalogName: normalizeTextValue(item?.catalogName) || drama.catalogName,
+    }),
+    catalogName: rankCatalogName,
     rank_value_label: unitName,
     rank_value: rankValue,
     main_cvs: mainCvs,
@@ -1240,6 +1338,7 @@ function buildNormalizedRanksResponse(snapshot) {
 
   return {
     success: true,
+    schemaVersion: RANKS_RESPONSE_SCHEMA_VERSION,
     updatedAt: normalizeTextValue(safeSnapshot?._meta?.updated_at),
     platforms: {
       missevan: buildNormalizedRankPlatform(safeSnapshot, "missevan"),
@@ -1262,7 +1361,11 @@ async function readRanksSnapshot() {
 
 async function getCachedRanksResponse() {
   const now = Date.now();
-  if (ranksCache.response && now - ranksCache.loadedAt < RANKS_CACHE_TTL_MS) {
+  if (
+    ranksCache.response &&
+    ranksCache.response.schemaVersion === RANKS_RESPONSE_SCHEMA_VERSION &&
+    now - ranksCache.loadedAt < RANKS_CACHE_TTL_MS
+  ) {
     return ranksCache.response;
   }
 
@@ -1634,10 +1737,72 @@ const MANBO_CATEGORY_ALIASES = Object.freeze({
 });
 
 const MISSEVAN_CATEGORY_CATALOGS = Object.freeze({
-  radio_drama: 89,
+  radio_drama: [89, 90],
   audio_drama: 93,
   audio_comic: 96,
 });
+
+const CONTENT_TYPE_LABEL_BY_CATEGORY = Object.freeze({
+  radio_drama: "广播剧",
+  audio_drama: "有声剧",
+  audio_comic: "有声漫",
+});
+
+const MISSEVAN_CONTENT_TYPE_BY_CATALOG = Object.freeze(
+  Object.fromEntries(
+    Object.entries(MISSEVAN_CATEGORY_CATALOGS).flatMap(([category, catalogs]) =>
+      (Array.isArray(catalogs) ? catalogs : [catalogs]).map((catalog) => [
+        catalog,
+        CONTENT_TYPE_LABEL_BY_CATEGORY[category],
+      ])
+    )
+  )
+);
+
+function getMissevanContentTypeLabel(record) {
+  return MISSEVAN_CONTENT_TYPE_BY_CATALOG[Number(record?.catalog ?? 0)] || "";
+}
+
+function getManboContentTypeLabel(record) {
+  const catalogName = normalizeTextValue(record?.catalogName);
+  if (recordTextIncludesAny(catalogName, MANBO_CATEGORY_ALIASES.radio_drama)) {
+    return CONTENT_TYPE_LABEL_BY_CATEGORY.radio_drama;
+  }
+  if (recordTextIncludesAny(catalogName, MANBO_CATEGORY_ALIASES.audio_drama)) {
+    return CONTENT_TYPE_LABEL_BY_CATEGORY.audio_drama;
+  }
+  if (
+    recordTextIncludesAny(catalogName, MANBO_CATEGORY_ALIASES.audio_comic) ||
+    recordTextIncludesAny(
+      [record?.genre, record?.name, record?.seriesTitle],
+      MANBO_CATEGORY_ALIASES.audio_comic
+    )
+  ) {
+    return CONTENT_TYPE_LABEL_BY_CATEGORY.audio_comic;
+  }
+  return "";
+}
+
+function getMissevanPaymentLabel(card) {
+  if (card?.is_member) {
+    return "会员";
+  }
+  return Number(card?.price ?? 0) > 0 || Number(card?.member_price ?? 0) > 0
+    ? "付费"
+    : "免费";
+}
+
+function getManboPaymentLabel(card) {
+  if (card?.is_member) {
+    return "会员";
+  }
+  if (Number(card?.price ?? 0) === 100) {
+    return "免费";
+  }
+  return ["season", "episode"].includes(String(card?.revenue_type ?? ""))
+    ? "付费"
+    : "免费";
+}
 
 function escapeRegExp(value) {
   return String(value ?? "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -1716,7 +1881,8 @@ function matchesMissevanSearchCategory(record, category) {
   }
 
   const expectedCatalog = MISSEVAN_CATEGORY_CATALOGS[category];
-  return Number(record?.catalog ?? 0) === expectedCatalog;
+  const expectedCatalogs = Array.isArray(expectedCatalog) ? expectedCatalog : [expectedCatalog];
+  return expectedCatalogs.includes(Number(record?.catalog ?? 0));
 }
 
 function scoreManboLibraryRecord(record, keyword) {
@@ -1883,7 +2049,7 @@ function getManboMainCvNames(record) {
 
 function buildManboSearchFallbackCard(record) {
   const mainCvs = getManboMainCvNames(record);
-  return {
+  const card = {
     id: String(record?.dramaId ?? ""),
     name: record?.name || "",
     cover: record?.cover || "",
@@ -1897,15 +2063,20 @@ function buildManboSearchFallbackCard(record) {
     is_member: false,
     checked: false,
     platform: "manbo",
+    content_type_label: getManboContentTypeLabel(record),
     main_cvs: mainCvs,
     main_cv_text: buildMainCvText(mainCvs),
+  };
+  return {
+    ...card,
+    payment_label: getManboPaymentLabel(card),
   };
 }
 
 function buildMissevanSearchFallbackCard(record) {
   const mainCvs = getMissevanMainCvNames(record);
   const primarySoundId = normalizeStringIdArray(record?.soundIds, 1)[0] || null;
-  return {
+  const card = {
     id: Number(record?.dramaId ?? 0),
     name: record?.title || "",
     cover: "",
@@ -1921,8 +2092,13 @@ function buildMissevanSearchFallbackCard(record) {
     checked: false,
     platform: "missevan",
     search_source: "library",
+    content_type_label: getMissevanContentTypeLabel(record),
     main_cvs: mainCvs,
     main_cv_text: buildMainCvText(mainCvs),
+  };
+  return {
+    ...card,
+    payment_label: getMissevanPaymentLabel(card),
   };
 }
 
@@ -2083,7 +2259,7 @@ function getMissevanApiCvNames(info, limit = 2) {
 }
 
 function buildMissevanApiSearchFallbackCard(record, mainCvs = []) {
-  return {
+  const card = {
     id: Number(record?.dramaId ?? 0),
     name: record?.title || "",
     cover: record?.cover || "",
@@ -2099,8 +2275,13 @@ function buildMissevanApiSearchFallbackCard(record, mainCvs = []) {
     checked: false,
     platform: "missevan",
     search_source: "missevan_api",
+    content_type_label: "",
     main_cvs: mainCvs,
     main_cv_text: buildMainCvText(mainCvs),
+  };
+  return {
+    ...card,
+    payment_label: getMissevanPaymentLabel(card),
   };
 }
 
@@ -2146,7 +2327,7 @@ async function hydrateMissevanSearchRecord(record) {
     }
 
     const viewCount = Number(info.drama.view_count ?? 0);
-    return {
+    const card = {
       ...fallbackCard,
       cover: info.drama.cover || fallbackCard.cover,
       view_count: viewCount,
@@ -2165,6 +2346,11 @@ async function hydrateMissevanSearchRecord(record) {
         info.drama.subscription_num
       ),
       reward_num: rewardNum,
+    };
+    return {
+      ...card,
+      payment_label: getMissevanPaymentLabel(card),
+      content_type_label: getMissevanContentTypeLabel(info.drama) || fallbackCard.content_type_label,
     };
   } catch (error) {
     if (isMissevanAccessDenied(error)) {
@@ -2204,8 +2390,7 @@ async function hydrateMissevanApiSearchRecord(record) {
 
     const mainCvs = getMissevanApiCvNames(info, 2);
     const viewCount = Number(info.drama.view_count ?? 0);
-
-    return {
+    const card = {
       ...fallbackCard,
       cover: info.drama.cover || fallbackCard.cover,
       view_count: viewCount,
@@ -2226,6 +2411,11 @@ async function hydrateMissevanApiSearchRecord(record) {
       reward_num: rewardNum,
       main_cvs: mainCvs,
       main_cv_text: buildMainCvText(mainCvs),
+    };
+    return {
+      ...card,
+      payment_label: getMissevanPaymentLabel(card),
+      content_type_label: getMissevanContentTypeLabel(info.drama),
     };
   } catch (error) {
     if (isMissevanAccessDenied(error)) {
@@ -2252,6 +2442,8 @@ async function hydrateManboSearchRecord(record) {
     return {
       ...card,
       checked: false,
+      payment_label: getManboPaymentLabel(card),
+      content_type_label: card.content_type_label || fallbackCard.content_type_label,
       main_cvs: fallbackCard.main_cvs,
       main_cv_text: fallbackCard.main_cv_text,
     };
@@ -2967,7 +3159,7 @@ function normalizeManboCardFromDramaInfo(info) {
   }
   const revenueType = getManboRevenueType(info);
 
-  return {
+  const card = {
     id: drama.id,
     name: drama.name,
     cover: drama.cover,
@@ -2983,6 +3175,11 @@ function normalizeManboCardFromDramaInfo(info) {
     revenue_type: revenueType,
     checked: true,
     platform: "manbo",
+  };
+  return {
+    ...card,
+    payment_label: getManboPaymentLabel(card),
+    content_type_label: getManboContentTypeLabel(drama),
   };
 }
 
@@ -3662,7 +3859,12 @@ async function fetchManboDanmakuSummary(setId, dramaTitle, episodeTitle = "") {
         error: "",
       };
 
-      setCachedValue(manboDanmakuCache, setId, summary);
+      setCachedValue(
+        manboDanmakuCache,
+        setId,
+        summary,
+        MANBO_DANMAKU_CACHE_MAX_ENTRIES
+      );
       void writeUsageLog({
         platform: "manbo",
         action: "danmaku_summary",
@@ -3920,6 +4122,13 @@ function createRevenueSummary(results) {
     failed,
     summaryTitle,
   };
+}
+
+function compactRevenueResults(results) {
+  return (Array.isArray(results) ? results : []).map((item) => {
+    const { paidUserIds: _paidUserIds, ...compactItem } = item || {};
+    return compactItem;
+  });
 }
 
 function getManboRevenueType(info) {
@@ -4670,17 +4879,19 @@ async function executeMissevanRevenueTask(task) {
   }
 
   if (task.cancelled) {
+    const revenueSummary = createRevenueSummary(results);
     return finalizeCancelledTask(task, {
       result: {
-        revenueResults: results,
+        revenueResults: compactRevenueResults(results),
         revenueSummary: {
-          ...createRevenueSummary(results),
+          ...revenueSummary,
           suspectedOverflowEpisodes: Array.from(suspectedOverflowEpisodes),
         },
       },
     });
   }
 
+  const revenueSummary = createRevenueSummary(results);
   updateStatsTask(task, {
     status: "completed",
     progress: 100,
@@ -4688,9 +4899,9 @@ async function executeMissevanRevenueTask(task) {
       ? "收益预估完成，部分失败"
       : "收益预估完成",
     result: {
-      revenueResults: results,
+      revenueResults: compactRevenueResults(results),
       revenueSummary: {
-        ...createRevenueSummary(results),
+        ...revenueSummary,
         suspectedOverflowEpisodes: Array.from(suspectedOverflowEpisodes),
       },
     },
@@ -4790,7 +5001,10 @@ async function executeManboRevenueTask(task) {
         });
         completeRevenueDramaUnits(task, dramaUnit, `正在统计收益：${title} / 已完成`);
       } else {
-        const episodeUsers = [];
+        const paidUserSet = new Set();
+        const episodePrices = new Set();
+        let paidEpisodeCount = 0;
+        let episodeRevenue = 0;
         let failed = false;
         let accessDenied = false;
         for (let episodeIndex = 0; episodeIndex < revenueEpisodes.length; episodeIndex += 1) {
@@ -4813,10 +5027,18 @@ async function executeManboRevenueTask(task) {
             );
             break;
           }
-          episodeUsers.push({
-            episode,
-            users: Array.isArray(danmakuResult.users) ? danmakuResult.users : [],
+          const users = Array.isArray(danmakuResult.users) ? danmakuResult.users : [];
+          const episodePrice = Number(episode?.price ?? 0);
+          users.forEach((uid) => {
+            if (uid != null && uid !== "") {
+              paidUserSet.add(String(uid));
+            }
           });
+          paidEpisodeCount += 1;
+          episodeRevenue += users.length * episodePrice;
+          if (episodePrice > 0) {
+            episodePrices.add(episodePrice);
+          }
           if (await isLikelyManboDanmakuOverflow(episode.sound_id, danmakuResult.danmaku)) {
             suspectedOverflowEpisodes.add(
               buildOverflowEpisodeKey(dramaId, String(episode?.name ?? "").trim())
@@ -4837,9 +5059,7 @@ async function executeManboRevenueTask(task) {
           task.failedCount += 1;
         }
         task.accessDenied = task.accessDenied || accessDenied;
-        const paidUserIds = Array.from(new Set(
-          episodeUsers.flatMap((item) => item.users.map((uid) => String(uid)))
-        ));
+        const paidUserIds = Array.from(paidUserSet);
         const paidUserCount = paidUserIds.length;
 
         if (revenueType === "member") {
@@ -4895,21 +5115,11 @@ async function executeManboRevenueTask(task) {
             accessDenied,
           });
         } else {
-          const paidEpisodeCount = episodeUsers.length;
-          const episodePrices = [
-            ...new Set(
-              episodeUsers
-                .map((item) => Number(item?.episode?.price ?? 0))
-                .filter((price) => price > 0)
-            ),
-          ];
-          const episodeRevenue = episodeUsers.reduce((sum, item) => {
-            return sum + item.users.length * Number(item?.episode?.price ?? 0);
-          }, 0);
+          const uniqueEpisodePrices = Array.from(episodePrices);
           const minRevenueYuan = (episodeRevenue + diamondValue) / 100;
-          const hasUniformEpisodePrice = episodePrices.length === 1;
+          const hasUniformEpisodePrice = uniqueEpisodePrices.length === 1;
           const maxRevenueYuan = hasUniformEpisodePrice
-            ? (paidUserCount * episodePrices[0] * paidEpisodeCount + diamondValue) / 100
+            ? (paidUserCount * uniqueEpisodePrices[0] * paidEpisodeCount + diamondValue) / 100
             : null;
           results.push({
             dramaId,
@@ -4920,7 +5130,7 @@ async function executeManboRevenueTask(task) {
             viewCount,
             diamondValue,
             titlePrice: hasUniformEpisodePrice
-              ? Number(episodePrices[0] ?? 0) * paidEpisodeCount
+              ? Number(uniqueEpisodePrices[0] ?? 0) * paidEpisodeCount
               : null,
             titleMemberPrice: null,
             includeInSummaryPrice: hasUniformEpisodePrice,
@@ -4977,17 +5187,19 @@ async function executeManboRevenueTask(task) {
   }
 
   if (task.cancelled) {
+    const revenueSummary = createRevenueSummary(results);
     return finalizeCancelledTask(task, {
       result: {
-        revenueResults: results,
+        revenueResults: compactRevenueResults(results),
         revenueSummary: {
-          ...createRevenueSummary(results),
+          ...revenueSummary,
           suspectedOverflowEpisodes: Array.from(suspectedOverflowEpisodes),
         },
       },
     });
   }
 
+  const revenueSummary = createRevenueSummary(results);
   updateStatsTask(task, {
     status: "completed",
     progress: 100,
@@ -4995,9 +5207,9 @@ async function executeManboRevenueTask(task) {
       ? "收益预估完成，部分失败"
       : "收益预估完成",
     result: {
-      revenueResults: results,
+      revenueResults: compactRevenueResults(results),
       revenueSummary: {
-        ...createRevenueSummary(results),
+        ...revenueSummary,
         suspectedOverflowEpisodes: Array.from(suspectedOverflowEpisodes),
       },
     },
@@ -5767,6 +5979,9 @@ app.post("/manbo/getdramacards", async (req, res) => {
         const nextCard = {
           ...card,
         };
+        if (libraryRecord) {
+          nextCard.content_type_label = getManboContentTypeLabel(libraryRecord) || nextCard.content_type_label;
+        }
         if (libraryRecord && mainCvs.length > 0) {
           nextCard.main_cvs = mainCvs;
           nextCard.main_cv_text = buildMainCvText(mainCvs);
@@ -5943,6 +6158,7 @@ function createStatsTask({ platform, taskType, episodes = [], dramaIds = [] }) {
     lastSeenAt: Date.now(),
   };
 
+  cleanupExpiredStatsTasks();
   manboStatsTaskStore.set(taskId, task);
   executeStatsTask(task);
   return task;

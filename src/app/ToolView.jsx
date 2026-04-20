@@ -973,7 +973,7 @@ export function ToolView({ initialAppConfig }) {
 
   return (
     <div className="mx-auto flex min-h-screen max-w-7xl flex-col gap-4 px-3 pb-24 pt-3 sm:px-5 sm:pb-8 lg:gap-5 lg:px-6">
-      <header className="sticky top-0 z-20 -mx-3 border-b border-border/75 bg-background/92 px-3 py-3 backdrop-blur-xl sm:-mx-5 sm:px-5 lg:-mx-6 lg:px-6">
+      <header className="-mx-3 border-b border-border/75 bg-background/92 px-3 py-3 backdrop-blur-xl sm:-mx-5 sm:px-5 lg:sticky lg:top-0 lg:z-20 lg:-mx-6 lg:px-6">
         <div className="mx-auto flex max-w-7xl flex-col gap-3">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="min-w-0">

@@ -8,6 +8,7 @@ import {
   ChevronsRightIcon,
   CoinsIcon,
   GemIcon,
+  HashIcon,
   HeartIcon,
   ImportIcon,
   ListChecksIcon,
@@ -17,6 +18,7 @@ import {
   StarIcon,
   StepBackIcon,
   StepForwardIcon,
+  UsersIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -100,6 +102,44 @@ function MetricLegend({ className = "" }) {
     </div>
   );
 }
+
+const searchResultTagVariants = {
+  免费: "free",
+  会员: "member",
+  付费: "paid",
+  广播剧: "radioDrama",
+  有声剧: "audioDrama",
+  有声漫: "audioComic",
+};
+
+function getFallbackPaymentLabel(item) {
+  if (item?.is_member) {
+    return "会员";
+  }
+  if (item?.platform === "manbo") {
+    if (Number(item?.price ?? 0) === 100) {
+      return "免费";
+    }
+    return ["season", "episode"].includes(String(item?.revenue_type ?? "")) ? "付费" : "免费";
+  }
+  return Number(item?.price ?? 0) > 0 || Number(item?.member_price ?? 0) > 0 ? "付费" : "免费";
+}
+
+function getSearchResultPaymentTag(item) {
+  return String(item?.payment_label || getFallbackPaymentLabel(item)).trim();
+}
+
+function getSearchResultTitleTags(item) {
+  return [item?.content_type_label]
+    .map((label) => String(label ?? "").trim())
+    .filter(Boolean);
+}
+
+const metaBadgeClassName = "h-[1.05rem] px-1.5 text-[0.6rem] leading-none";
+const mobileInlineBadgeClassName = `${metaBadgeClassName} ml-1 -translate-y-px align-middle`;
+const coverPaymentBadgeClassName =
+  "absolute bottom-0 right-0 h-4 rounded-none rounded-tl-[calc(var(--radius)-0.18rem)] border-0! px-1 text-[0.54rem] leading-none shadow-none! lg:h-[1.05rem] lg:px-1.5 lg:text-[0.58rem]";
+const metaIconClassName = "size-3.5 shrink-0 text-muted-foreground";
 
 export function SearchResults({
   platform = "missevan",
@@ -378,6 +418,45 @@ export function SearchResults({
     return isPaidEpisode(platform, episode) ? "付费" : "";
   }
 
+  function getResultMetrics(item) {
+    return [
+      {
+        label: "总播放量",
+        value: formatPlainNumber(item.view_count),
+      },
+      item?.subscription_num != null
+        ? {
+            label: extraMetaLabel,
+            value: formatPlainNumber(item.subscription_num),
+          }
+        : null,
+      platform === "manbo" && !item?.is_member && item?.revenue_type !== "episode" && Number.isFinite(Number(item?.pay_count)) && Number(item.pay_count) > 0
+        ? {
+            label: "付费人数",
+            value: formatPlainNumber(item.pay_count),
+          }
+        : null,
+      platform === "manbo" && item?.is_member && Number.isFinite(Number(item?.member_listen_count)) && Number(item.member_listen_count) > 0
+        ? {
+            label: "收听人数",
+            value: formatPlainNumber(item.member_listen_count),
+          }
+        : null,
+      platform === "missevan" && item?.reward_num != null && Number.isFinite(Number(item.reward_num))
+        ? {
+            label: "打赏人数",
+            value: formatPlainNumber(item.reward_num),
+          }
+        : null,
+      platform === "manbo"
+        ? {
+            label: "投喂总数",
+            value: formatPlainNumber(item.diamond_value),
+          }
+        : null,
+    ].filter(Boolean);
+  }
+
   const actionButtonBaseClass = "h-9 w-full justify-start px-2.5 text-xs";
   const mobileActionButtonClass = "h-9 min-w-0 gap-1 px-1.5 text-[0.64rem] sm:px-2 sm:text-xs";
 
@@ -547,6 +626,9 @@ export function SearchResults({
               const importedDrama = getImportedDrama(item.id);
               const coverUrl = buildProxyImageUrl(item.cover);
               const mainCvText = item.main_cv_text || "";
+              const paymentTag = getSearchResultPaymentTag(item);
+              const titleTags = getSearchResultTitleTags(item);
+              const metrics = getResultMetrics(item);
 
               return (
                 <div key={item.id} className="rounded-lg border border-border/75 bg-card p-3.5 shadow-[0_18px_36px_-32px_rgba(15,23,42,0.18)] sm:p-4">
@@ -572,38 +654,67 @@ export function SearchResults({
                             </Button>
                           )}
                         </div>
-                        <div className="size-[4rem] shrink-0 self-start overflow-hidden rounded-[calc(var(--radius)-0.05rem)] border border-border/70 bg-muted/50">
+                        <div className="relative size-20 shrink-0 self-start overflow-hidden rounded-[calc(var(--radius)-0.05rem)] border border-border/70 bg-muted/50 lg:size-[6rem]">
                           {coverUrl ? (
-                            <img alt={item.name} className="aspect-square size-[4rem] object-cover" src={coverUrl} />
+                            <img alt={item.name} className="aspect-square size-20 object-cover lg:size-[6rem]" src={coverUrl} />
                           ) : (
-                            <div className="flex aspect-square size-[4rem] items-center justify-center text-xs text-muted-foreground">
+                            <div className="flex aspect-square size-20 items-center justify-center text-xs text-muted-foreground lg:size-[6rem]">
                               暂无封面
                             </div>
                           )}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                                <span className={`min-w-0 break-words ${getTitleClassName(item.name)}`}>{item.name}</span>
-                                {item.is_member ? <Badge variant="info" className="shrink-0">会员</Badge> : null}
-                              </div>
-                            </div>
-                            {importedDrama ? <Badge variant="coral" className="shrink-0">已导入分集</Badge> : null}
-                          </div>
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            {idLabel}: {item.id}
-                          </div>
-                          {mainCvText ? (
-                            <div className="mt-1 text-xs text-muted-foreground">
-                              {mainCvText}
-                            </div>
+                          {paymentTag ? (
+                            <Badge variant={searchResultTagVariants[paymentTag] || "outline"} className={coverPaymentBadgeClassName}>
+                              {paymentTag}
+                            </Badge>
                           ) : null}
+                        </div>
+                        <div className="flex min-w-0 flex-1 flex-col gap-1 lg:h-24 lg:justify-between lg:gap-0">
+                          <div className="hidden min-w-0 flex-wrap items-center gap-1.5 lg:flex">
+                            <span className={`min-w-0 break-words ${getTitleClassName(item.name)}`}>{item.name}</span>
+                            {titleTags.map((label) => (
+                              <Badge key={`${item.id}-desktop-${label}`} variant={searchResultTagVariants[label] || "outline"} className={metaBadgeClassName}>
+                                {label}
+                              </Badge>
+                            ))}
+                            {importedDrama ? <Badge variant="imported" className={metaBadgeClassName}>已导入</Badge> : null}
+                          </div>
+                          <div className="min-w-0 lg:hidden">
+                            <span className={`break-words ${getTitleClassName(item.name)}`}>{item.name}</span>
+                            {titleTags.map((label) => (
+                              <Badge key={`${item.id}-${label}`} variant={searchResultTagVariants[label] || "outline"} className={mobileInlineBadgeClassName}>
+                                {label}
+                              </Badge>
+                            ))}
+                            {importedDrama ? <Badge variant="imported" className={mobileInlineBadgeClassName}>已导入</Badge> : null}
+                          </div>
+                          <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                            <HashIcon aria-label={idLabel} className={metaIconClassName} title={idLabel} />
+                            <span className="min-w-0 break-all">{item.id}</span>
+                          </div>
+                          <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                            <UsersIcon aria-label="主要CV" className={metaIconClassName} title="主要CV" />
+                            <span className="min-w-0 break-words">{mainCvText.replace(/^主要CV：/, "") || "暂无"}</span>
+                          </div>
+                          <div className="mt-1 hidden min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-sm lg:flex">
+                            {metrics.map((metric) => (
+                              <div
+                                key={`${item.id}-desktop-${metric.label}`}
+                                aria-label={`${metric.label}: ${metric.value}`}
+                                title={`${metric.label}: ${metric.value}`}
+                                className="max-w-full text-foreground"
+                              >
+                                <span className="inline-flex w-fit max-w-full items-center gap-1">
+                                  <MetricIcon label={metric.label} className="size-3.5 shrink-0 text-muted-foreground" />
+                                  <span className="min-w-0 break-all text-[0.74rem] font-medium tabular-nums sm:text-sm">{metric.value}</span>
+                                </span>
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       </div>
 
                       {importedDrama ? (
-                        <div className="flex flex-wrap gap-2 lg:max-w-[14rem] lg:justify-end">
+                        <div className="hidden flex-wrap gap-2 lg:flex lg:max-w-[14rem] lg:justify-end">
                           <div className="flex h-8 items-center gap-2 rounded-[calc(var(--radius)-0.12rem)] border border-border/70 bg-background/84 px-2.5 text-xs font-medium text-foreground">
                             <Switch
                               aria-label="切换当前作品全选"
@@ -628,45 +739,8 @@ export function SearchResults({
                       ) : null}
                     </div>
 
-                    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 text-sm">
-                      {[
-                        {
-                          label: "总播放量",
-                          value: formatPlainNumber(item.view_count),
-                        },
-                        item?.subscription_num != null
-                          ? {
-                              label: extraMetaLabel,
-                              value: formatPlainNumber(item.subscription_num),
-                            }
-                          : null,
-                        platform === "manbo" && !item?.is_member && item?.revenue_type !== "episode" && Number.isFinite(Number(item?.pay_count)) && Number(item.pay_count) > 0
-                          ? {
-                              label: "付费人数",
-                              value: formatPlainNumber(item.pay_count),
-                            }
-                          : null,
-                        platform === "manbo" && item?.is_member && Number.isFinite(Number(item?.member_listen_count)) && Number(item.member_listen_count) > 0
-                          ? {
-                              label: "收听人数",
-                              value: formatPlainNumber(item.member_listen_count),
-                            }
-                          : null,
-                        platform === "missevan" && item?.reward_num != null && Number.isFinite(Number(item.reward_num))
-                          ? {
-                              label: "打赏人数",
-                              value: formatPlainNumber(item.reward_num),
-                            }
-                          : null,
-                        platform === "manbo"
-                          ? {
-                              label: "投喂总数",
-                              value: formatPlainNumber(item.diamond_value),
-                            }
-                          : null,
-                      ]
-                        .filter(Boolean)
-                        .map((metric) => (
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 text-sm lg:hidden">
+                      {metrics.map((metric) => (
                           <div
                             key={`${item.id}-${metric.label}`}
                             aria-label={`${metric.label}: ${metric.value}`}
@@ -680,6 +754,31 @@ export function SearchResults({
                           </div>
                         ))}
                     </div>
+
+                    {importedDrama ? (
+                      <div className="flex flex-wrap gap-2 lg:hidden">
+                        <div className="flex h-8 items-center gap-2 rounded-[calc(var(--radius)-0.12rem)] border border-border/70 bg-background/84 px-2.5 text-xs font-medium text-foreground">
+                          <Switch
+                            aria-label="切换当前作品全选"
+                            size="sm"
+                            checked={areAllEpisodesSelected(item.id)}
+                            onCheckedChange={(checked) => setSelectedEpisodes(item.id, () => Boolean(checked))}
+                            className="data-checked:bg-primary data-unchecked:bg-muted dark:data-unchecked:bg-muted"
+                          />
+                          <span>全选</span>
+                        </div>
+                        <div className="flex h-8 items-center gap-2 rounded-[calc(var(--radius)-0.12rem)] border border-border/70 bg-background/84 px-2.5 text-xs font-medium text-foreground">
+                          <Switch
+                            aria-label="切换当前作品付费分集"
+                            size="sm"
+                            checked={arePaidEpisodesSelected(item.id)}
+                            onCheckedChange={(checked) => setPaidEpisodesSelected(item.id, Boolean(checked))}
+                            className="data-checked:bg-primary data-unchecked:bg-muted dark:data-unchecked:bg-muted"
+                          />
+                          <span>付费</span>
+                        </div>
+                      </div>
+                    ) : null}
 
                     {importedDrama?.expanded ? (
                       <>

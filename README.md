@@ -89,6 +89,8 @@ Windows 桌面版会直接在界面中提示这一步。
 | `MANBO_DANMAKU_PAGE_CONCURRENCY` | 弹幕分页抓取并发数 | `12` |
 | `MANBO_STATS_EPISODE_CONCURRENCY` | 统计任务分集并发数 | `4` |
 | `MANBO_FETCH_TIMEOUT_MS` | 请求超时毫秒数 | `10000` |
+| `MANBO_DANMAKU_CACHE_MAX_ENTRIES` | 弹幕用户缓存最大条目数，托管部署默认更小以降低内存占用 | Render/Railway `20`，本地 `200` |
+| `MANBO_STATS_TASK_TTL_MS` | 统计任务结果保留时间，托管部署默认更短以降低内存占用 | Render/Railway `900000`，本地 `3600000` |
 
 ### 节点路由
 

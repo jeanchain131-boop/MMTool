@@ -16,6 +16,20 @@ const badgeVariants = cva(
           "border-[rgba(59,62,122,0.18)] bg-[rgb(59,62,122)] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] [a]:hover:bg-[color-mix(in_srgb,rgb(59,62,122)_90%,black)]",
         coral:
           "border-[rgba(239,131,95,0.18)] bg-[rgb(239,131,95)] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] [a]:hover:bg-[color-mix(in_srgb,rgb(239,131,95)_90%,black)]",
+        free:
+          "border-[rgba(31,157,138,0.18)] bg-[rgb(31,157,138)] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] [a]:hover:bg-[color-mix(in_srgb,rgb(31,157,138)_90%,black)]",
+        member:
+          "border-[rgba(59,62,122,0.18)] bg-[rgb(59,62,122)] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] [a]:hover:bg-[color-mix(in_srgb,rgb(59,62,122)_90%,black)]",
+        paid:
+          "border-[rgba(239,131,95,0.18)] bg-[rgb(239,131,95)] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] [a]:hover:bg-[color-mix(in_srgb,rgb(239,131,95)_90%,black)]",
+        radioDrama:
+          "border-[rgba(36,74,134,0.18)] bg-[rgb(36,74,134)] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] [a]:hover:bg-[color-mix(in_srgb,rgb(36,74,134)_90%,black)]",
+        audioDrama:
+          "border-[rgba(122,93,199,0.18)] bg-[rgb(122,93,199)] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] [a]:hover:bg-[color-mix(in_srgb,rgb(122,93,199)_90%,black)]",
+        audioComic:
+          "border-[rgba(190,62,116,0.18)] bg-[rgb(190,62,116)] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] [a]:hover:bg-[color-mix(in_srgb,rgb(190,62,116)_90%,black)]",
+        imported:
+          "border-[rgba(36,74,134,0.18)] bg-[rgb(224,236,252)] text-[rgb(24,54,104)] shadow-[inset_0_1px_0_rgba(255,255,255,0.5)] [a]:hover:bg-[rgb(211,227,248)]",
         destructive:
           "bg-destructive/10 text-destructive focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:focus-visible:ring-destructive/40 [a]:hover:bg-destructive/20",
         outline:

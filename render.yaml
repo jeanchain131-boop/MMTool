@@ -8,3 +8,11 @@ services:
     envVars:
       - key: ENABLE_MISSEVAN
         value: "false"
+      - key: MANBO_DANMAKU_PAGE_CONCURRENCY
+        value: "12"
+      - key: MANBO_STATS_EPISODE_CONCURRENCY
+        value: "4"
+      - key: MANBO_DANMAKU_CACHE_MAX_ENTRIES
+        value: "20"
+      - key: MANBO_STATS_TASK_TTL_MS
+        value: "900000"

@@ -3,6 +3,7 @@ import {
   BeanIcon,
   CoinsIcon,
   GemIcon,
+  HashIcon,
   HeartIcon,
   MessageCircleIcon,
   PlayCircleIcon,
@@ -10,6 +11,7 @@ import {
   ShoppingCartIcon,
   StarIcon,
   TrophyIcon,
+  UsersIcon,
 } from "lucide-react";
 
 import { buildVersionedUrl, formatPlainNumber, getBackendVersionFromResponse } from "@/app/app-utils";
@@ -144,6 +146,35 @@ function MetricLegend() {
   );
 }
 
+const rankTagVariants = {
+  免费: "free",
+  会员: "member",
+  付费: "paid",
+  广播剧: "radioDrama",
+  有声剧: "audioDrama",
+  有声漫: "audioComic",
+};
+
+const metaBadgeClassName = "h-[1.05rem] px-1.5 text-[0.6rem] leading-none";
+const mobileInlineBadgeClassName = `${metaBadgeClassName} ml-1 -translate-y-px align-middle`;
+const coverPaymentBadgeClassName =
+  "absolute bottom-0 right-0 h-4 rounded-none rounded-tl-[calc(var(--radius)-0.18rem)] border-0! px-1 text-[0.54rem] leading-none shadow-none! lg:h-[1.05rem] lg:px-1.5 lg:text-[0.58rem]";
+const metaIconClassName = "size-3.5 shrink-0 text-muted-foreground";
+
+function getRankPaymentTag(item) {
+  if (item?.is_member) {
+    return "会员";
+  }
+  return String(item?.payment_label ?? "").trim();
+}
+
+function getRankTitleTags(item) {
+  return [item?.content_type_label || item?.catalogName || item?.catalog_name]
+    .map((label) => String(label ?? "").trim())
+    .map((label) => (label === "有声书" ? "有声剧" : label))
+    .filter(Boolean);
+}
+
 function getRankMetrics(platform, item, rankKey = "") {
   const metrics = [
     {
@@ -193,6 +224,13 @@ function RankItemCard({ item, platform, rankKey = "" }) {
   const isMissevanPeak = platform === "missevan" && item.type === "peak";
   const dramaIdText = Array.isArray(item.drama_ids) && item.drama_ids.length ? item.drama_ids.join("，") : "";
   const recentUpdatedDate = isMissevanPeak ? "" : formatRankUpdatedDate(item.updated_at);
+  const paymentTag = getRankPaymentTag(item);
+  const titleTags = getRankTitleTags(item);
+  const detailIdText = isMissevanPeak ? dramaIdText : item.id;
+  const mainCvText = String(item.main_cv_text ?? "").replace(/^主要CV：/, "");
+  const displayMetrics = isMissevanPeak
+    ? [{ label: "系列总播放量", iconLabel: "总播放量", value: formatPlainNumber(item.view_count) }]
+    : metrics;
 
   return (
     <Card className="border-border/75 bg-card py-3 shadow-[0_18px_36px_-32px_rgba(15,23,42,0.18)]">
@@ -201,42 +239,58 @@ function RankItemCard({ item, platform, rankKey = "" }) {
           <div className="flex size-7 shrink-0 items-center justify-center rounded-md border border-border/70 bg-background text-xs font-semibold tabular-nums text-foreground">
             {item.rank}
           </div>
-          <div className="size-[4rem] shrink-0 overflow-hidden rounded-[calc(var(--radius)-0.05rem)] border border-border/70 bg-muted/50">
+          <div className="relative size-20 shrink-0 overflow-hidden rounded-[calc(var(--radius)-0.05rem)] border border-border/70 bg-muted/50 lg:size-[6rem]">
             {coverUrl ? (
-              <img alt={item.name} className="aspect-square size-[4rem] object-cover" src={coverUrl} />
+              <img alt={item.name} className="aspect-square size-20 object-cover lg:size-[6rem]" src={coverUrl} />
             ) : (
-              <div className="flex aspect-square size-[4rem] items-center justify-center text-xs text-muted-foreground">
+              <div className="flex aspect-square size-20 items-center justify-center text-xs text-muted-foreground lg:size-[6rem]">
                 暂无封面
               </div>
             )}
+            {paymentTag ? (
+              <Badge variant={rankTagVariants[paymentTag] || "outline"} className={coverPaymentBadgeClassName}>
+                {paymentTag}
+              </Badge>
+            ) : null}
           </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            <div className="hidden min-w-0 flex-wrap items-center gap-1.5 lg:flex">
               <span className={`min-w-0 break-words ${getTitleClassName(item.name)}`}>{item.name}</span>
-              {item.is_member ? <Badge variant="info" className="shrink-0">会员</Badge> : null}
+              {titleTags.map((label) => (
+                <Badge key={`${item.rank}-${item.id || item.name}-desktop-${label}`} variant={rankTagVariants[label] || "outline"} className={metaBadgeClassName}>
+                  {label}
+                </Badge>
+              ))}
             </div>
-            {item.id && !isMissevanPeak ? (
-              <div className="mt-1 text-xs text-muted-foreground">
-                作品ID：{item.id}
+            <div className="min-w-0 lg:hidden">
+              <span className={`break-words ${getTitleClassName(item.name)}`}>{item.name}</span>
+              {titleTags.map((label) => (
+                <Badge key={`${item.rank}-${item.id || item.name}-${label}`} variant={rankTagVariants[label] || "outline"} className={mobileInlineBadgeClassName}>
+                  {label}
+                </Badge>
+              ))}
+            </div>
+            {detailIdText ? (
+              <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                <HashIcon aria-label={isMissevanPeak ? "包含作品ID" : "作品ID"} className={metaIconClassName} title={isMissevanPeak ? "包含作品ID" : "作品ID"} />
+                <span className="min-w-0 break-all">{detailIdText}</span>
               </div>
             ) : null}
-            {isMissevanPeak && dramaIdText ? (
-              <div className="mt-1 text-xs text-muted-foreground">包含作品ID：{dramaIdText}</div>
-            ) : null}
-            {item.main_cv_text ? <div className="mt-1 text-xs text-muted-foreground">{item.main_cv_text}</div> : null}
+            <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+              <UsersIcon aria-label="主要CV" className={metaIconClassName} title="主要CV" />
+              <span className="min-w-0 break-words">{mainCvText || "暂无"}</span>
+            </div>
             {recentUpdatedDate ? (
-              <div className="mt-1 text-xs text-muted-foreground">最近更新：{recentUpdatedDate}</div>
+              <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                <RefreshCwIcon aria-label="最近更新" className={metaIconClassName} title="最近更新" />
+                <span className="min-w-0 break-all">{recentUpdatedDate}</span>
+              </div>
             ) : null}
           </div>
         </div>
 
-        {isMissevanPeak ? (
-          <div className="mt-3 text-sm font-medium text-foreground">
-            系列总播放量：{formatPlainNumber(item.view_count)}
-          </div>
-        ) : (
-          <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm">
-            {metrics.map((metric) => (
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm lg:ml-10">
+          {displayMetrics.map((metric) => (
               <div
                 key={`${item.id}-${metric.label}`}
                 aria-label={`${metric.label}: ${metric.value}`}
@@ -252,8 +306,7 @@ function RankItemCard({ item, platform, rankKey = "" }) {
                 </span>
               </div>
             ))}
-          </div>
-        )}
+        </div>
       </CardContent>
     </Card>
   );
